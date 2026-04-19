@@ -28,6 +28,10 @@
   let lastState = null;
   let pollInFlight = false;
   const controlsByPath = new Map();
+  let infoBubbleEl = null;
+  let infoBubbleContentEl = null;
+  let infoBubbleTitleEl = null;
+  let activeInfoButtonEl = null;
 
   const metricConfig = [
     { key: "status", label: "Status" },
@@ -37,6 +41,101 @@
     { key: "configuredTargetYmm", label: "Configured Target Y", unit: "mm" },
     { key: "liveForwardReturnMm", label: "Live Forward Return", unit: "mm" },
   ];
+
+  function ensureInfoBubble() {
+    if (infoBubbleEl) {
+      return;
+    }
+
+    infoBubbleEl = document.createElement("div");
+    infoBubbleEl.className = "info-bubble hidden";
+    infoBubbleEl.innerHTML = `
+      <div class="info-bubble-header">
+        <div class="info-bubble-title"></div>
+        <button type="button" class="info-bubble-close" aria-label="Close help bubble">×</button>
+      </div>
+      <div class="info-bubble-content"></div>
+    `;
+
+    infoBubbleTitleEl = infoBubbleEl.querySelector(".info-bubble-title");
+    infoBubbleContentEl = infoBubbleEl.querySelector(".info-bubble-content");
+    const closeButton = infoBubbleEl.querySelector(".info-bubble-close");
+    closeButton.addEventListener("click", hideInfoBubble);
+    document.body.append(infoBubbleEl);
+
+    document.addEventListener("click", (event) => {
+      if (!infoBubbleEl || infoBubbleEl.classList.contains("hidden")) {
+        return;
+      }
+      if (infoBubbleEl.contains(event.target)) {
+        return;
+      }
+      if (activeInfoButtonEl && activeInfoButtonEl.contains(event.target)) {
+        return;
+      }
+      hideInfoBubble();
+    });
+
+    window.addEventListener("resize", hideInfoBubble);
+    window.addEventListener(
+      "scroll",
+      () => {
+        if (activeInfoButtonEl) {
+          hideInfoBubble();
+        }
+      },
+      true
+    );
+  }
+
+  function hideInfoBubble() {
+    if (!infoBubbleEl) {
+      return;
+    }
+    infoBubbleEl.classList.add("hidden");
+    if (activeInfoButtonEl) {
+      activeInfoButtonEl.classList.remove("active");
+      activeInfoButtonEl = null;
+    }
+  }
+
+  function showInfoBubble(spec, buttonEl) {
+    ensureInfoBubble();
+
+    if (activeInfoButtonEl === buttonEl && !infoBubbleEl.classList.contains("hidden")) {
+      hideInfoBubble();
+      return;
+    }
+
+    if (activeInfoButtonEl) {
+      activeInfoButtonEl.classList.remove("active");
+    }
+
+    activeInfoButtonEl = buttonEl;
+    activeInfoButtonEl.classList.add("active");
+    infoBubbleTitleEl.textContent = spec.path;
+    infoBubbleContentEl.textContent =
+      spec.helpText || "No extra help available for this parameter yet.";
+
+    infoBubbleEl.classList.remove("hidden");
+
+    const rect = buttonEl.getBoundingClientRect();
+    const bubbleWidth = 360;
+    const bubblePadding = 12;
+    const top = Math.min(window.innerHeight - 180, rect.top + window.scrollY + 28);
+    let left = rect.left + window.scrollX + 24;
+
+    if (left + bubbleWidth > window.scrollX + window.innerWidth - bubblePadding) {
+      left = window.scrollX + window.innerWidth - bubbleWidth - bubblePadding;
+    }
+    if (left < window.scrollX + bubblePadding) {
+      left = window.scrollX + bubblePadding;
+    }
+
+    infoBubbleEl.style.top = `${Math.max(window.scrollY + bubblePadding, top)}px`;
+    infoBubbleEl.style.left = `${left}px`;
+    infoBubbleEl.style.width = `${bubbleWidth}px`;
+  }
 
   function setStatus(message) {
     statusMessageEl.textContent = message || "Ready.";
@@ -233,17 +332,14 @@
         description.className = "param-description";
         description.textContent = spec.description;
 
-        const helpPanel = document.createElement("div");
-        helpPanel.className = "param-help hidden";
-        helpPanel.textContent = spec.helpText || "No extra help available for this parameter yet.";
-
-        infoButton.addEventListener("click", () => {
-          helpPanel.classList.toggle("hidden");
-          infoButton.classList.toggle("active");
+        infoButton.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          showInfoBubble(spec, infoButton);
         });
 
         header.append(label, infoButton);
-        meta.append(header, path, description, helpPanel);
+        meta.append(header, path, description);
         row.append(meta, createControl(spec));
         list.append(row);
       });

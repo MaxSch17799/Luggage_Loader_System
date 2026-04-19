@@ -477,6 +477,10 @@ class PointStore:
 class RPLidarWorker(threading.Thread):
     """Background thread that reads LiDAR points and forwards them to a thread-safe queue."""
 
+    STOP_REQUEST = b"\xa5\x25"
+    RESET_REQUEST = b"\xa5\x40"
+    STARTUP_RETRIES = 3
+
     def __init__(
         self,
         port: str,
@@ -496,6 +500,56 @@ class RPLidarWorker(threading.Thread):
     def stop(self) -> None:
         self.stop_requested.set()
 
+    def _resync_serial_port(self, reset_device: bool) -> None:
+        """Try to leave the LiDAR UART link in a clean state before init."""
+        probe = serial.Serial(
+            port=self.port,
+            baudrate=self.baudrate,
+            timeout=self.timeout_s,
+        )
+        try:
+            time.sleep(0.05)
+            probe.reset_input_buffer()
+            probe.reset_output_buffer()
+
+            probe.write(self.STOP_REQUEST)
+            probe.flush()
+            time.sleep(0.05)
+
+            if reset_device:
+                probe.write(self.RESET_REQUEST)
+                probe.flush()
+                time.sleep(0.65)
+
+            probe.reset_input_buffer()
+            probe.reset_output_buffer()
+        finally:
+            probe.close()
+
+    def _create_lidar_with_retries(self) -> Any:
+        from rplidarc1 import RPLidar
+
+        last_error: Exception | None = None
+        for attempt in range(1, self.STARTUP_RETRIES + 1):
+            try:
+                self._resync_serial_port(reset_device=(attempt > 1))
+            except Exception:
+                # Best-effort cleanup only. If this fails we still try the actual init.
+                pass
+
+            try:
+                return RPLidar(self.port, self.baudrate, timeout=self.timeout_s)
+            except Exception as exc:
+                last_error = exc
+                time.sleep(0.25 * attempt)
+
+        detail = (
+            "Failed to initialize the RPLIDAR after multiple attempts. "
+            "This usually means the serial stream started mid-packet or the LiDAR was left "
+            "streaming from a previous session. Unplugging/replugging USB can also help."
+        )
+        raise RuntimeError(detail) from last_error
+
     async def _copy_points(self, lidar: Any) -> None:
         while not lidar.stop_event.is_set():
             try:
@@ -510,9 +564,7 @@ class RPLidarWorker(threading.Thread):
         lidar.stop_event.set()
 
     async def _run_async(self) -> None:
-        from rplidarc1 import RPLidar
-
-        lidar = RPLidar(self.port, self.baudrate, timeout=self.timeout_s)
+        lidar = self._create_lidar_with_retries()
         try:
             async with asyncio.TaskGroup() as task_group:
                 task_group.create_task(lidar.simple_scan())

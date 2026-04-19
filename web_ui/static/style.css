@@ -291,18 +291,6 @@ button:disabled {
   font-size: 0.92rem;
 }
 
-.param-help {
-  margin-top: 10px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(11, 125, 105, 0.07);
-  border: 1px solid rgba(11, 125, 105, 0.14);
-  color: #31564d;
-  line-height: 1.5;
-  font-size: 0.9rem;
-  white-space: pre-wrap;
-}
-
 .param-controls {
   display: grid;
   gap: 8px;
@@ -413,6 +401,59 @@ button:disabled {
   width: 100%;
   height: 100%;
   min-height: 520px;
+}
+
+.info-bubble {
+  position: absolute;
+  z-index: 1000;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: #fffdf8;
+  border: 1px solid rgba(216, 208, 191, 0.92);
+  box-shadow: 0 18px 40px rgba(63, 44, 16, 0.16);
+  color: var(--text);
+}
+
+.info-bubble-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.info-bubble-title {
+  font-weight: 800;
+  color: var(--accent);
+  word-break: break-word;
+}
+
+.info-bubble-close {
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #f8f4ea;
+  color: var(--muted);
+  box-shadow: none;
+  font-size: 1rem;
+}
+
+.info-bubble-close:hover {
+  background: #efe8d8;
+  transform: none;
+}
+
+.info-bubble-content {
+  line-height: 1.55;
+  color: #3d463f;
+  white-space: normal;
 }
 
 code {
