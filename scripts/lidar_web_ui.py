@@ -13,6 +13,7 @@ import webbrowser
 from typing import Any
 
 from flask import Flask, jsonify, render_template, request
+from werkzeug.serving import make_server
 
 from lidar_live_view import (
     DEFAULT_CONFIG_PATH,
@@ -59,22 +60,77 @@ class DemoSession:
         self.error_queue: queue.Queue[str] = queue.Queue()
         self.worker: RPLidarWorker | None = None
         self.last_worker_error: str | None = None
+        self.shutdown_requested = False
 
         if not simulate:
-            preflight_live_port(self.editor.config)
-            self.worker = RPLidarWorker(
-                port=str(self.editor.config["serial"]["port"]),
-                baudrate=int(self.editor.config["serial"]["baudrate"]),
-                timeout_s=float(self.editor.config["serial"]["timeout_s"]),
-                output_queue=self.measurement_queue,
-                error_queue=self.error_queue,
-            )
-            self.worker.start()
+            self.start_lidar()
 
     def stop(self) -> None:
+        self.stop_lidar(update_status=False)
+
+    def lidar_available(self) -> bool:
+        return not self.simulate
+
+    def lidar_running(self) -> bool:
+        return self.worker is not None and self.worker.is_alive()
+
+    def start_lidar(self) -> str:
+        if self.simulate:
+            self.editor.status_message = "Simulation mode does not use a physical LiDAR."
+            return self.editor.status_message
+
+        if self.lidar_running():
+            self.editor.status_message = "LiDAR is already running."
+            return self.editor.status_message
+
+        self.measurement_queue = queue.Queue()
+        self.error_queue = queue.Queue()
+        self.last_worker_error = None
+
+        preflight_live_port(self.editor.config)
+        self.worker = RPLidarWorker(
+            port=str(self.editor.config["serial"]["port"]),
+            baudrate=int(self.editor.config["serial"]["baudrate"]),
+            timeout_s=float(self.editor.config["serial"]["timeout_s"]),
+            output_queue=self.measurement_queue,
+            error_queue=self.error_queue,
+        )
+        self.worker.start()
+        self.editor.status_message = "LiDAR started."
+        return self.editor.status_message
+
+    def stop_lidar(self, update_status: bool = True) -> str:
+        if self.simulate:
+            self.editor.status_message = "Simulation mode does not use a physical LiDAR."
+            return self.editor.status_message
+
         if self.worker is not None:
             self.worker.stop()
             self.worker.join(timeout=2.0)
+            self.worker = None
+
+        self.measurement_queue = queue.Queue()
+        self.error_queue = queue.Queue()
+        self.point_store.clear()
+        if update_status:
+            self.editor.status_message = "LiDAR stopped and live points cleared."
+        return self.editor.status_message
+
+    def toggle_lidar_power(self) -> str:
+        if self.simulate:
+            self.editor.status_message = "Simulation mode does not use a physical LiDAR."
+            return self.editor.status_message
+
+        if self.lidar_running():
+            return self.stop_lidar(update_status=True)
+        return self.start_lidar()
+
+    def request_shutdown(self) -> str:
+        self.shutdown_requested = True
+        if self.lidar_available():
+            self.stop_lidar(update_status=False)
+        self.editor.status_message = "Stopping demo and shutting down the browser server."
+        return self.editor.status_message
 
     def schema_payload(self) -> dict[str, Any]:
         with self.lock:
@@ -227,6 +283,16 @@ class DemoSession:
                 "configPath": str(self.config_path),
                 "statusMessage": self.editor.status_message,
                 "workerError": self.last_worker_error,
+                "shutdownRequested": self.shutdown_requested,
+                "lidar": {
+                    "available": self.lidar_available(),
+                    "running": self.lidar_running(),
+                    "label": (
+                        "Turn LiDAR Off"
+                        if self.lidar_running()
+                        else "Turn LiDAR On"
+                    ),
+                },
                 "parameterValues": self._current_values(),
                 "metrics": {
                     "status": status_label(metrics.center_offset_m, centered_band_m),
@@ -273,6 +339,10 @@ class DemoSession:
             self.editor.status_message = "Cleared plotted points from the browser UI."
             return self.editor.status_message
 
+    def lidar_power_action(self) -> str:
+        with self.lock:
+            return self.toggle_lidar_power()
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Browser-based Steer Clear LiDAR demo UI")
@@ -310,7 +380,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def create_app(session: DemoSession) -> Flask:
+def create_app(session: DemoSession, shutdown_callback: Any | None = None) -> Flask:
     app = Flask(
         __name__,
         template_folder=str(TEMPLATE_DIR),
@@ -365,6 +435,31 @@ def create_app(session: DemoSession) -> Flask:
     def api_clear_points() -> Any:
         return jsonify({"ok": True, "message": session.clear_points()})
 
+    @app.post("/api/lidar-power")
+    def api_lidar_power() -> Any:
+        try:
+            message = session.lidar_power_action()
+            return jsonify(
+                {
+                    "ok": True,
+                    "message": message,
+                    "running": session.lidar_running(),
+                }
+            )
+        except Exception as exc:
+            session.last_worker_error = traceback.format_exc()
+            session.editor.status_message = f"LiDAR power action failed: {exc}"
+            return jsonify({"ok": False, "message": session.editor.status_message}), 500
+
+    @app.post("/api/shutdown")
+    def api_shutdown() -> Any:
+        message = session.request_shutdown()
+        if shutdown_callback is not None:
+            timer = threading.Timer(0.3, shutdown_callback)
+            timer.daemon = True
+            timer.start()
+        return jsonify({"ok": True, "message": message})
+
     return app
 
 
@@ -390,12 +485,14 @@ def main() -> int:
 
     try:
         if args.smoke_test:
-            app = create_app(session)
+            app = create_app(session, shutdown_callback=lambda: None)
             payload = session.state_payload()
             with app.test_client() as client:
                 index_response = client.get("/")
                 schema_response = client.get("/api/schema")
                 state_response = client.get("/api/state")
+                lidar_response = client.post("/api/lidar-power")
+                shutdown_response = client.post("/api/shutdown")
 
             if index_response.status_code != 200:
                 raise RuntimeError("Index route failed during smoke test")
@@ -403,6 +500,10 @@ def main() -> int:
                 raise RuntimeError("Schema route failed during smoke test")
             if state_response.status_code != 200:
                 raise RuntimeError("State route failed during smoke test")
+            if lidar_response.status_code not in {200, 500}:
+                raise RuntimeError("LiDAR power route failed during smoke test")
+            if shutdown_response.status_code != 200:
+                raise RuntimeError("Shutdown route failed during smoke test")
 
             print(f"Mode: {payload['mode']}")
             print(f"Config: {payload['configPath']}")
@@ -410,7 +511,14 @@ def main() -> int:
             print(f"Rendered points: {payload['plot']['renderedPointCount']}")
             return 0
 
-        app = create_app(session)
+        server_holder: dict[str, Any] = {}
+
+        def shutdown_server() -> None:
+            server = server_holder.get("server")
+            if server is not None:
+                server.shutdown()
+
+        app = create_app(session, shutdown_callback=shutdown_server)
         url = f"http://{args.host}:{args.port}"
 
         print(f"Steer Clear browser UI: {url}")
@@ -419,7 +527,9 @@ def main() -> int:
         print(f"Mode: {session.mode_label}")
 
         maybe_open_browser(url, enabled=not args.no_browser)
-        app.run(host=args.host, port=args.port, debug=False, use_reloader=False, threaded=True)
+        server = make_server(args.host, args.port, app, threaded=True)
+        server_holder["server"] = server
+        server.serve_forever()
         return 0
     finally:
         session.stop()

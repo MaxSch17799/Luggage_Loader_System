@@ -119,8 +119,10 @@ How it works:
 - each parameter now has a small `i` button for a more intuitive explanation
 - `-` and `+` do fine nudges
 - `--` and `++` do coarse nudges
+- `Turn LiDAR On/Off` starts or stops the live LiDAR worker
 - `Reload From TOML` reloads the file from disk
 - `Clear Points` clears the current plot points
+- `Close Demo` stops the demo server and requests LiDAR shutdown
 
 Good first parameters to tune:
 

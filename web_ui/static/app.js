@@ -6,6 +6,8 @@
   const nudgeUrl = "/api/nudge";
   const reloadUrl = "/api/reload";
   const clearPointsUrl = "/api/clear-points";
+  const lidarPowerUrl = "/api/lidar-power";
+  const shutdownUrl = "/api/shutdown";
 
   const sectionsRoot = document.getElementById("parameterSections");
   const metricsRoot = document.getElementById("metricsGrid");
@@ -17,6 +19,8 @@
   const configPathEl = document.getElementById("configPath");
   const reloadButtonEl = document.getElementById("reloadButton");
   const clearPointsButtonEl = document.getElementById("clearPointsButton");
+  const lidarPowerButtonEl = document.getElementById("lidarPowerButton");
+  const closeDemoButtonEl = document.getElementById("closeDemoButton");
   const canvasEl = document.getElementById("sceneCanvas");
   const canvasCtx = canvasEl.getContext("2d");
 
@@ -310,6 +314,47 @@
     }
   }
 
+  async function toggleLidarPower() {
+    try {
+      const result = await postJson(lidarPowerUrl, {});
+      setStatus(result.message);
+      await pollState(true);
+    } catch (error) {
+      setStatus(`LiDAR power control failed: ${error.message}`);
+    }
+  }
+
+  async function closeDemo() {
+    const confirmed = window.confirm(
+      "Close the Steer Clear demo, stop the LiDAR, and shut down the browser server?"
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const result = await postJson(shutdownUrl, {});
+      setStatus(result.message);
+      document.body.innerHTML = `
+        <div style="padding:40px;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
+          <h1 style="margin-top:0;">Steer Clear demo stopped</h1>
+          <p>The background demo server has been shut down and the LiDAR stop request was sent.</p>
+          <p>You can now close this tab or return to the launcher terminal.</p>
+        </div>
+      `;
+      window.setTimeout(() => {
+        try {
+          window.open("", "_self");
+          window.close();
+        } catch (_error) {
+          /* ignore */
+        }
+      }, 250);
+    } catch (error) {
+      setStatus(`Close demo failed: ${error.message}`);
+    }
+  }
+
   function syncControls(parameterValues) {
     controlsByPath.forEach((inputEl, path) => {
       if (document.activeElement === inputEl) {
@@ -324,6 +369,13 @@
         inputEl.value = textValue;
       }
     });
+  }
+
+  function syncToolbar(state) {
+    const lidar = state.lidar || { available: false, running: false, label: "LiDAR" };
+    lidarPowerButtonEl.disabled = !lidar.available || !!state.shutdownRequested;
+    lidarPowerButtonEl.textContent = lidar.available ? lidar.label : "Simulation mode";
+    closeDemoButtonEl.disabled = !!state.shutdownRequested;
   }
 
   function filterParameters(query) {
@@ -523,6 +575,7 @@
       setStatus(lastState.statusMessage);
       setWorkerError(lastState.workerError);
       syncControls(lastState.parameterValues);
+      syncToolbar(lastState);
       renderMetrics(lastState.metrics);
       drawScene(lastState);
     } catch (error) {
@@ -544,6 +597,8 @@
   async function start() {
     reloadButtonEl.addEventListener("click", reloadToml);
     clearPointsButtonEl.addEventListener("click", clearPoints);
+    lidarPowerButtonEl.addEventListener("click", toggleLidarPower);
+    closeDemoButtonEl.addEventListener("click", closeDemo);
     searchInputEl.addEventListener("input", () => {
       filterParameters(searchInputEl.value);
     });
