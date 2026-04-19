@@ -61,7 +61,20 @@ if [ ! -x ".venv/bin/python" ]; then
     echo "No virtual environment found. Creating one now..."
     python3 -m venv .venv
     .venv/bin/python -m pip install --upgrade pip
+fi
+
+REQ_HASH_FILE=".venv/.requirements_hash"
+CURRENT_REQ_HASH="$(sha256sum requirements.txt | awk '{print $1}')"
+INSTALLED_REQ_HASH=""
+if [ -f "$REQ_HASH_FILE" ]; then
+    INSTALLED_REQ_HASH="$(cat "$REQ_HASH_FILE")"
+fi
+
+if [ "$CURRENT_REQ_HASH" != "$INSTALLED_REQ_HASH" ]; then
+    echo "Installing or updating Python dependencies..."
+    .venv/bin/python -m pip install --upgrade pip
     .venv/bin/pip install -r requirements.txt
+    echo "$CURRENT_REQ_HASH" > "$REQ_HASH_FILE"
 fi
 
 CONFIG_PORT="$(
@@ -84,8 +97,8 @@ while true; do
     fi
     echo ""
     echo "Choose how to run the demo:"
-    echo "1) Simulate demo"
-    echo "2) Live LiDAR demo"
+    echo "1) Simulate browser demo"
+    echo "2) Live LiDAR browser demo"
     echo "3) Run diagnostics"
     echo "4) Show serial ports"
     echo "5) Exit"
@@ -95,13 +108,13 @@ while true; do
     case "$CHOICE" in
         1)
             run_and_log \
-                "simulate_demo" \
-                env PYTHONUNBUFFERED=1 .venv/bin/python scripts/lidar_live_view.py --simulate
+                "simulate_browser_demo" \
+                env PYTHONUNBUFFERED=1 .venv/bin/python scripts/lidar_web_ui.py --simulate
             ;;
         2)
             run_and_log \
-                "live_lidar_demo" \
-                env PYTHONUNBUFFERED=1 .venv/bin/python scripts/lidar_live_view.py
+                "live_lidar_browser_demo" \
+                env PYTHONUNBUFFERED=1 .venv/bin/python scripts/lidar_web_ui.py
             ;;
         3)
             run_and_log \

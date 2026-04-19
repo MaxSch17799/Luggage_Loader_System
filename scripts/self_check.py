@@ -87,6 +87,7 @@ def main() -> int:
                 "-m",
                 "py_compile",
                 "scripts/lidar_live_view.py",
+                "scripts/lidar_web_ui.py",
                 "scripts/show_serial_ports.py",
                 "scripts/lidar_diagnostics.py",
                 "scripts/self_check.py",
@@ -94,7 +95,19 @@ def main() -> int:
         )
 
         run_step(
-            "Simulated viewer smoke test",
+            "Browser UI smoke test",
+            [
+                sys.executable,
+                "scripts/lidar_web_ui.py",
+                "--simulate",
+                "--smoke-test",
+                "--no-browser",
+            ],
+            env={**os.environ, "MPLBACKEND": "Agg"},
+        )
+
+        run_step(
+            "Legacy viewer smoke test",
             [
                 sys.executable,
                 "scripts/lidar_live_view.py",

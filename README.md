@@ -8,6 +8,7 @@ Current contents:
 - [SURROUNDINGS_AND_WARNING_APPROACHES.md](/home/max/Desktop/Steer_Clear/SURROUNDINGS_AND_WARNING_APPROACHES.md)
 - [GITHUB_SSH_SETUP.md](/home/max/Desktop/Steer_Clear/GITHUB_SSH_SETUP.md)
 - [config/system_parameters.toml](/home/max/Desktop/Steer_Clear/config/system_parameters.toml)
+- [scripts/lidar_web_ui.py](/home/max/Desktop/Steer_Clear/scripts/lidar_web_ui.py)
 - [scripts/lidar_diagnostics.py](/home/max/Desktop/Steer_Clear/scripts/lidar_diagnostics.py)
 - [scripts/self_check.py](/home/max/Desktop/Steer_Clear/scripts/self_check.py)
 - [scripts/lidar_live_view.py](/home/max/Desktop/Steer_Clear/scripts/lidar_live_view.py)
@@ -87,28 +88,21 @@ This is the easiest first test.
 ```bash
 cd /home/max/Desktop/Steer_Clear
 source .venv/bin/activate
-python scripts/lidar_live_view.py --simulate
+python scripts/lidar_web_ui.py --simulate
 ```
 
 What you should see:
 
-- a graph window
-- LiDAR dots
-- the LiDAR mount position
-- the loader lip line
-- the configured target opening line
-- a text readout showing:
-  - center offset
-  - left clearance
-  - right clearance
-  - configured forward target
-  - live forward return inside the corridor
+- a browser tab opened to `http://127.0.0.1:8765`
+- a parameter sidebar with editable fields
+- a live scene plot in the browser
+- cards showing center offset, left clearance, right clearance, and forward return
 
-Close the window or press `Ctrl+C` to stop it.
+Press `Ctrl+C` in the terminal to stop the server.
 
 ## Live Tuning Inside the Demo
 
-The demo now opens a separate clickable parameter panel window.
+The browser UI lists all editable parameters in grouped sections on the left.
 
 Any change you make there is written straight back into:
 
@@ -121,13 +115,11 @@ How it works:
 - click into a numeric field
 - type a new value
 - press `Enter` or click away to apply it live
-- boolean or enum values appear as dropdowns
-- `-` and `+` buttons do fine nudges
-- `--` and `++` buttons do coarse nudges
+- booleans and enums appear as dropdowns
+- `-` and `+` do fine nudges
+- `--` and `++` do coarse nudges
 - `Reload From TOML` reloads the file from disk
 - `Clear Points` clears the current plot points
-
-Keyboard fallback still exists, but it is no longer the main way to edit values.
 
 Good first parameters to tune:
 
@@ -161,8 +153,8 @@ If that does not launch, open a terminal in the folder and run:
 
 The launcher lets you choose:
 
-- simulate demo
-- live LiDAR demo
+- simulate browser demo
+- live LiDAR browser demo
 - run diagnostics
 - show serial ports
 
@@ -182,21 +174,25 @@ If something fails, copy the path of the `.log` file or paste its contents back 
 ```bash
 cd /home/max/Desktop/Steer_Clear
 source .venv/bin/activate
-python scripts/lidar_live_view.py
+python scripts/lidar_web_ui.py
 ```
+
+The browser page should open automatically. If it does not, go to:
+
+- `http://127.0.0.1:8765`
 
 If the dots look rotated incorrectly, edit:
 
 - `mount.scan_angle_offset_deg`
 
-in the parameter sheet and run the script again.
+in the browser UI or the parameter sheet.
 
 ## Useful Test Command
 
 This runs the visualizer for only 5 seconds:
 
 ```bash
-python scripts/lidar_live_view.py --simulate --duration-seconds 5
+python scripts/lidar_web_ui.py --simulate
 ```
 
 ## Diagnostics

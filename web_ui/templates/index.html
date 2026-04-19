@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Steer Clear Browser UI</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">Steer Clear</div>
+        <h1>Browser-Based LiDAR Demo</h1>
+        <div class="subline">
+          <span id="modeBadge" class="mode-badge">{{ bootstrap.mode }}</span>
+          <span id="configPath">{{ bootstrap.configPath }}</span>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button id="reloadButton" class="secondary">Reload TOML</button>
+        <button id="clearPointsButton" class="secondary">Clear Points</button>
+      </div>
+    </header>
+
+    <div class="status-strip">
+      <div id="statusMessage" class="status-message">Loading browser UI…</div>
+      <div id="workerError" class="worker-error hidden"></div>
+    </div>
+
+    <div class="content-grid">
+      <aside class="sidebar">
+        <div class="panel-card">
+          <label class="search-label" for="searchInput">Find a parameter</label>
+          <input id="searchInput" type="search" placeholder="Search mount, lip, target, corridor…">
+          <p class="hint">
+            Edit values directly in the fields below. Changes apply live and are saved back into
+            <code>config/system_parameters.toml</code>.
+          </p>
+        </div>
+        <div id="parameterSections" class="parameter-sections"></div>
+      </aside>
+
+      <main class="main-content">
+        <section id="metricsGrid" class="metrics-grid"></section>
+
+        <section class="plot-card">
+          <div class="plot-header">
+            <div>
+              <h2>Live Scene View</h2>
+              <p>Top-down loader frame with LiDAR points, lip, target opening, and forward corridor.</p>
+            </div>
+            <div id="pointCounter" class="point-counter">0 points</div>
+          </div>
+          <div class="canvas-wrap">
+            <canvas id="sceneCanvas"></canvas>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    window.APP_BOOTSTRAP = {{ bootstrap | tojson }};
+  </script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
