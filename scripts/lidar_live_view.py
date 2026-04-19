@@ -10,6 +10,7 @@ import os
 import pathlib
 import queue
 import random
+import re
 import threading
 import time
 import traceback
@@ -18,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import matplotlib.pyplot as plt
+from matplotlib.backend_bases import KeyEvent
 from matplotlib.patches import Rectangle
 import numpy as np
 import serial
@@ -25,6 +27,139 @@ import serial
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "system_parameters.toml"
+
+
+PARAMETER_ORDER = [
+    ("mount", "side"),
+    ("mount", "sensor_x_m"),
+    ("mount", "sensor_y_m"),
+    ("mount", "sensor_z_m"),
+    ("mount", "scan_angle_offset_deg"),
+    ("mount", "pitch_deg"),
+    ("lip", "center_x_m"),
+    ("lip", "tip_y_m"),
+    ("lip", "width_m"),
+    ("target", "center_x_m"),
+    ("target", "opening_width_m"),
+    ("target", "forward_y_m"),
+    ("target", "left_edge_trim_m"),
+    ("target", "right_edge_trim_m"),
+    ("guidance", "corridor_center_x_m"),
+    ("guidance", "corridor_half_width_m"),
+    ("guidance", "centered_band_m"),
+    ("filtering", "min_quality"),
+    ("filtering", "min_range_m"),
+    ("filtering", "max_range_m"),
+    ("visualization", "x_min_m"),
+    ("visualization", "x_max_m"),
+    ("visualization", "y_min_m"),
+    ("visualization", "y_max_m"),
+    ("visualization", "point_ttl_s"),
+    ("visualization", "angle_bucket_deg"),
+    ("visualization", "update_period_s"),
+    ("visualization", "point_size"),
+    ("console", "print_interval_s"),
+    ("simulation", "enabled"),
+    ("simulation", "reveal_depth_m"),
+    ("simulation", "wall_point_spacing_m"),
+    ("simulation", "noise_m"),
+    ("simulation", "background_clutter_points"),
+]
+
+
+PARAMETER_METADATA: dict[tuple[str, str], dict[str, Any]] = {
+    ("mount", "side"): {
+        "allowed_values": ["left", "right"],
+        "description": "Informational mount side label for the LiDAR position.",
+    },
+    ("mount", "sensor_x_m"): {
+        "fine_step": 0.01,
+        "coarse_step": 0.05,
+        "description": "LiDAR position left/right. Positive is right of belt centerline.",
+    },
+    ("mount", "sensor_y_m"): {
+        "fine_step": 0.01,
+        "coarse_step": 0.10,
+        "description": "LiDAR position fore/aft. Negative is behind the lip tip plane.",
+    },
+    ("mount", "sensor_z_m"): {
+        "fine_step": 0.01,
+        "coarse_step": 0.05,
+        "description": "LiDAR height above the belt.",
+    },
+    ("mount", "scan_angle_offset_deg"): {
+        "fine_step": 0.5,
+        "coarse_step": 5.0,
+        "description": "Rotates the scan into the loader frame.",
+    },
+    ("mount", "pitch_deg"): {
+        "fine_step": 0.5,
+        "coarse_step": 2.0,
+        "description": "Placeholder pitch parameter for future 3D-aware logic.",
+    },
+    ("lip", "center_x_m"): {
+        "fine_step": 0.01,
+        "coarse_step": 0.05,
+        "description": "Lip centerline in the loader frame.",
+    },
+    ("lip", "tip_y_m"): {
+        "fine_step": 0.01,
+        "coarse_step": 0.05,
+        "description": "Lip tip plane in the loader frame.",
+    },
+    ("lip", "width_m"): {
+        "fine_step": 0.01,
+        "coarse_step": 0.05,
+        "description": "Usable lip width.",
+    },
+    ("target", "center_x_m"): {
+        "fine_step": 0.01,
+        "coarse_step": 0.05,
+        "description": "Target opening centerline.",
+    },
+    ("target", "opening_width_m"): {
+        "fine_step": 0.01,
+        "coarse_step": 0.05,
+        "description": "Opening width for the mock docking target.",
+    },
+    ("target", "forward_y_m"): {
+        "fine_step": 0.01,
+        "coarse_step": 0.10,
+        "description": "Forward target distance from the lip tip plane.",
+    },
+    ("target", "left_edge_trim_m"): {
+        "fine_step": 0.005,
+        "coarse_step": 0.02,
+        "description": "Asymmetric trim for the left target edge.",
+    },
+    ("target", "right_edge_trim_m"): {
+        "fine_step": 0.005,
+        "coarse_step": 0.02,
+        "description": "Asymmetric trim for the right target edge.",
+    },
+    ("guidance", "corridor_center_x_m"): {
+        "fine_step": 0.01,
+        "coarse_step": 0.05,
+        "description": "Center of the forward-distance corridor.",
+    },
+    ("guidance", "corridor_half_width_m"): {
+        "fine_step": 0.01,
+        "coarse_step": 0.05,
+        "description": "Half-width of the forward-distance corridor.",
+    },
+    ("guidance", "centered_band_m"): {
+        "fine_step": 0.005,
+        "coarse_step": 0.02,
+        "description": "How close to zero offset counts as CENTERED.",
+    },
+    ("simulation", "enabled"): {
+        "description": "Enable or disable fake scene generation in simulate mode.",
+    },
+}
+
+
+SECTION_RE = re.compile(r"^\s*\[(?P<section>[^\]]+)\]\s*$")
+ASSIGNMENT_RE = re.compile(r"^(?P<indent>\s*)(?P<key>[A-Za-z0-9_]+)(?P<eq>\s*=\s*).*$")
 
 
 @dataclass
@@ -50,6 +185,24 @@ class GeometryMetrics:
     live_forward_distance_m: float | None
 
 
+@dataclass
+class ParameterSpec:
+    section: str
+    key: str
+    description: str
+    fine_step: float | int | None
+    coarse_step: float | int | None
+    allowed_values: list[Any] | None = None
+
+    @property
+    def path(self) -> tuple[str, str]:
+        return self.section, self.key
+
+    @property
+    def label(self) -> str:
+        return f"{self.section}.{self.key}"
+
+
 class PointStore:
     """Keep the latest point for each angular bucket."""
 
@@ -57,6 +210,9 @@ class PointStore:
         self.ttl_s = ttl_s
         self.bucket_deg = bucket_deg
         self._points: dict[int, Point2D] = {}
+
+    def clear(self) -> None:
+        self._points.clear()
 
     def add(self, point: Point2D) -> None:
         bucket = int(round(point.angle_deg / self.bucket_deg))
@@ -131,9 +287,253 @@ class RPLidarWorker(threading.Thread):
             self.error_queue.put(traceback.format_exc())
 
 
+class LiveParameterEditor:
+    """Live parameter browser/editor that writes changes back to the TOML sheet."""
+
+    def __init__(self, config_path: pathlib.Path, config: dict[str, Any]) -> None:
+        self.config_path = config_path
+        self.config = config
+        self.specs = build_parameter_specs(config)
+        self.index = 0
+        self.show_help = True
+        self.status_message = "Editor ready. Changes autosave to the TOML file."
+        self.last_saved_path: tuple[str, str] | None = None
+
+    def selected_spec(self) -> ParameterSpec:
+        return self.specs[self.index]
+
+    def move_selection(self, delta: int) -> None:
+        self.index = (self.index + delta) % len(self.specs)
+        self.status_message = f"Selected {self.selected_spec().label}"
+
+    def reload_from_file(self) -> None:
+        self.config = load_config(self.config_path)
+        self.specs = build_parameter_specs(self.config)
+        self.index = min(self.index, len(self.specs) - 1)
+        self.status_message = "Reloaded parameter sheet from disk."
+
+    def toggle_help(self) -> None:
+        self.show_help = not self.show_help
+        self.status_message = "Toggled editor help."
+
+    def toggle_selected(self) -> bool:
+        spec = self.selected_spec()
+        current = get_config_value(self.config, spec.path)
+        if spec.allowed_values:
+            allowed = spec.allowed_values
+            current_index = allowed.index(current)
+            new_value = allowed[(current_index + 1) % len(allowed)]
+        elif isinstance(current, bool):
+            new_value = not current
+        else:
+            self.status_message = f"{spec.label} is numeric. Use arrows to edit it."
+            return False
+
+        self._save_value(spec, new_value)
+        return True
+
+    def adjust_selected(self, direction: int, coarse: bool) -> bool:
+        spec = self.selected_spec()
+        current = get_config_value(self.config, spec.path)
+
+        if spec.allowed_values or isinstance(current, bool):
+            self.status_message = f"{spec.label} is toggle-based. Press t to toggle."
+            return False
+
+        step = spec.coarse_step if coarse else spec.fine_step
+        if step is None:
+            self.status_message = f"{spec.label} has no step configured."
+            return False
+
+        if isinstance(current, int) and not isinstance(current, bool):
+            new_value = int(current + int(step) * direction)
+        elif isinstance(current, float):
+            new_value = round(current + float(step) * direction, 6)
+        else:
+            self.status_message = f"{spec.label} is not editable with arrows."
+            return False
+
+        self._save_value(spec, new_value)
+        return True
+
+    def _save_value(self, spec: ParameterSpec, value: Any) -> None:
+        set_config_value(self.config, spec.path, value)
+        save_config_value(self.config_path, spec.path, value)
+        self.last_saved_path = spec.path
+        self.status_message = f"Saved {spec.label} = {format_value_for_display(value)}"
+
+    def render_text(self) -> str:
+        spec = self.selected_spec()
+        selected_value = get_config_value(self.config, spec.path)
+
+        lines = [
+            "Live Parameter Editor",
+            "Autosave: ON",
+            f"Config: {self.config_path.name}",
+            "",
+            f"Selected: {spec.label}",
+            f"Value   : {format_value_for_display(selected_value)}",
+            f"Fine    : {format_step(spec.fine_step)}",
+            f"Coarse  : {format_step(spec.coarse_step)}",
+            f"Desc    : {spec.description}",
+            "",
+        ]
+
+        if self.show_help:
+            lines.extend(
+                [
+                    "Keys",
+                    "[ ] , . p n   previous / next parameter",
+                    "left/right a d - +   fine - / +",
+                    "down/up w s         coarse - / +",
+                    "t             toggle bool/enum",
+                    "r             reload TOML from disk",
+                    "c             clear plotted points",
+                    "h or ?        hide/show this help",
+                    "",
+                ]
+            )
+
+        lines.append("Nearby parameters")
+        for offset in range(-2, 3):
+            visible_index = (self.index + offset) % len(self.specs)
+            visible_spec = self.specs[visible_index]
+            prefix = ">" if visible_index == self.index else " "
+            visible_value = get_config_value(self.config, visible_spec.path)
+            lines.append(
+                f"{prefix} {visible_spec.label:<33} {format_value_for_display(visible_value)}"
+            )
+
+        lines.extend(["", f"Last action: {self.status_message}"])
+        return "\n".join(lines)
+
+
 def load_config(config_path: pathlib.Path) -> dict[str, Any]:
     with config_path.open("rb") as config_file:
         return tomllib.load(config_file)
+
+
+def iter_leaf_paths(config: dict[str, Any]) -> list[tuple[str, str]]:
+    paths: list[tuple[str, str]] = []
+    for section_name, section_values in config.items():
+        if not isinstance(section_values, dict):
+            continue
+        for key in section_values:
+            paths.append((section_name, key))
+    return paths
+
+
+def heuristic_steps(key: str, value: Any) -> tuple[float | int | None, float | int | None]:
+    if isinstance(value, bool):
+        return None, None
+    if isinstance(value, int):
+        return 1, 5
+    if isinstance(value, float):
+        if key.endswith("_deg"):
+            return 0.5, 5.0
+        if key.endswith("_s"):
+            return 0.05, 0.25
+        if key.endswith("_m"):
+            return 0.01, 0.10
+        return 0.10, 0.50
+    return None, None
+
+
+def build_parameter_specs(config: dict[str, Any]) -> list[ParameterSpec]:
+    config_paths = iter_leaf_paths(config)
+    ordered_paths = [path for path in PARAMETER_ORDER if path in config_paths]
+    remaining_paths = sorted(path for path in config_paths if path not in PARAMETER_ORDER)
+    combined_paths = ordered_paths + remaining_paths
+
+    specs: list[ParameterSpec] = []
+    for section, key in combined_paths:
+        if section in {"metadata", "serial"}:
+            continue
+        value = config[section][key]
+        metadata = PARAMETER_METADATA.get((section, key), {})
+        fine_step, coarse_step = heuristic_steps(key, value)
+        specs.append(
+            ParameterSpec(
+                section=section,
+                key=key,
+                description=metadata.get(
+                    "description",
+                    f"Editable value for {section}.{key}.",
+                ),
+                fine_step=metadata.get("fine_step", fine_step),
+                coarse_step=metadata.get("coarse_step", coarse_step),
+                allowed_values=metadata.get("allowed_values"),
+            )
+        )
+    return specs
+
+
+def get_config_value(config: dict[str, Any], path: tuple[str, str]) -> Any:
+    section, key = path
+    return config[section][key]
+
+
+def set_config_value(config: dict[str, Any], path: tuple[str, str], value: Any) -> None:
+    section, key = path
+    config[section][key] = value
+
+
+def format_toml_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        formatted = f"{value:.6f}".rstrip("0").rstrip(".")
+        if "." not in formatted:
+            formatted += ".0"
+        return formatted
+    raise TypeError(f"Unsupported TOML value type: {type(value)!r}")
+
+
+def save_config_value(config_path: pathlib.Path, path: tuple[str, str], value: Any) -> None:
+    section_name, key_name = path
+    lines = config_path.read_text(encoding="utf-8").splitlines()
+    current_section: str | None = None
+
+    for index, line in enumerate(lines):
+        section_match = SECTION_RE.match(line)
+        if section_match:
+            current_section = section_match.group("section")
+            continue
+
+        if current_section != section_name:
+            continue
+
+        assignment_match = ASSIGNMENT_RE.match(line)
+        if assignment_match and assignment_match.group("key") == key_name:
+            lines[index] = (
+                f"{assignment_match.group('indent')}"
+                f"{key_name}"
+                f"{assignment_match.group('eq')}"
+                f"{format_toml_value(value)}"
+            )
+            config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            return
+
+    raise KeyError(f"Could not find {section_name}.{key_name} in {config_path}")
+
+
+def format_value_for_display(value: Any) -> str:
+    if isinstance(value, float):
+        return f"{value:.4f}"
+    return str(value)
+
+
+def format_step(value: float | int | None) -> str:
+    if value is None:
+        return "toggle"
+    if isinstance(value, float):
+        return f"{value:.4f}"
+    return str(value)
 
 
 def get_target_edges(config: dict[str, Any]) -> tuple[float, float]:
@@ -243,6 +643,9 @@ def transform_measurement_to_loader_frame(
 
 
 def simulate_points(config: dict[str, Any], now_s: float) -> list[Point2D]:
+    if not bool(config["simulation"]["enabled"]):
+        return []
+
     mount = config["mount"]
     simulation = config["simulation"]
     visualization = config["visualization"]
@@ -321,75 +724,65 @@ def cartesian_to_point(
     )
 
 
-def build_plot(config: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
-    fig, ax = plt.subplots(figsize=(10, 8))
-    fig.canvas.manager.set_window_title("Steer Clear LiDAR Live View")
+def build_plot(config: dict[str, Any]) -> tuple[Any, Any, dict[str, Any]]:
+    fig, ax = plt.subplots(figsize=(13, 8))
+    if hasattr(fig.canvas.manager, "set_window_title"):
+        fig.canvas.manager.set_window_title("Steer Clear LiDAR Live View")
+    fig.subplots_adjust(left=0.08, right=0.60, bottom=0.08, top=0.92)
 
-    visualization = config["visualization"]
-    lip = config["lip"]
-    guidance = config["guidance"]
-    mount = config["mount"]
-
-    ax.set_xlim(float(visualization["x_min_m"]), float(visualization["x_max_m"]))
-    ax.set_ylim(float(visualization["y_min_m"]), float(visualization["y_max_m"]))
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, alpha=0.3)
     ax.set_xlabel("x (m)  positive = right side of belt")
     ax.set_ylabel("y (m)  positive = forward toward aircraft")
     ax.set_title("Steer Clear RPLIDAR C1 Visualizer")
 
-    point_artist = ax.scatter([], [], s=int(visualization["point_size"]), alpha=0.8)
-    sensor_artist = ax.scatter(
-        [float(mount["sensor_x_m"])],
-        [float(mount["sensor_y_m"])],
+    artists: dict[str, Any] = {}
+    artists["points"] = ax.scatter(
+        [],
+        [],
+        s=int(config["visualization"]["point_size"]),
+        alpha=0.8,
+    )
+    artists["sensor"] = ax.scatter(
+        [0.0],
+        [0.0],
         marker="x",
         s=80,
         color="tab:red",
         label="LiDAR mount",
     )
-    _ = sensor_artist
-
-    lip_left_x = float(lip["center_x_m"]) - float(lip["width_m"]) / 2.0
-    lip_right_x = float(lip["center_x_m"]) + float(lip["width_m"]) / 2.0
-    lip_tip_y = float(lip["tip_y_m"])
-    ax.plot(
-        [lip_left_x, lip_right_x],
-        [lip_tip_y, lip_tip_y],
+    (artists["lip_line"],) = ax.plot(
+        [],
+        [],
         color="tab:green",
         linewidth=4,
         label="Loader lip",
     )
-
-    target_left_x, target_right_x = get_target_edges(config)
-    target_forward_y = float(config["target"]["forward_y_m"])
-    ax.plot(
-        [target_left_x, target_right_x],
-        [target_forward_y, target_forward_y],
+    (artists["target_line"],) = ax.plot(
+        [],
+        [],
         color="tab:orange",
         linewidth=4,
         label="Configured target opening",
     )
-    ax.axvline(
-        float(config["target"]["center_x_m"]),
+    artists["target_centerline"] = ax.axvline(
+        0.0,
         color="tab:orange",
         linestyle="--",
         alpha=0.7,
         label="Target centerline",
     )
-    ax.axvline(
-        float(lip["center_x_m"]),
+    artists["lip_centerline"] = ax.axvline(
+        0.0,
         color="tab:green",
         linestyle=":",
         alpha=0.7,
         label="Lip centerline",
     )
-
-    corridor_center = float(guidance["corridor_center_x_m"])
-    corridor_half_width = float(guidance["corridor_half_width_m"])
     corridor_patch = Rectangle(
-        (corridor_center - corridor_half_width, lip_tip_y),
-        2.0 * corridor_half_width,
-        float(visualization["y_max_m"]) - lip_tip_y,
+        (0.0, 0.0),
+        0.1,
+        0.1,
         fill=False,
         linestyle="--",
         linewidth=1.5,
@@ -397,16 +790,86 @@ def build_plot(config: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
         alpha=0.6,
         label="Forward-distance corridor",
     )
+    artists["corridor"] = corridor_patch
     ax.add_patch(corridor_patch)
+    artists["metrics_text"] = fig.text(
+        0.02,
+        0.02,
+        "",
+        family="monospace",
+        fontsize=10,
+        va="bottom",
+        bbox={"facecolor": "white", "alpha": 0.85, "edgecolor": "#dddddd"},
+    )
+    artists["editor_text"] = fig.text(
+        0.63,
+        0.10,
+        "",
+        family="monospace",
+        fontsize=9,
+        va="bottom",
+        bbox={"facecolor": "white", "alpha": 0.90, "edgecolor": "#cccccc"},
+    )
+    artists["status_text"] = fig.text(
+        0.63,
+        0.95,
+        "",
+        family="monospace",
+        fontsize=9,
+        va="top",
+        color="tab:blue",
+        bbox={"facecolor": "white", "alpha": 0.90, "edgecolor": "#cccccc"},
+    )
     ax.legend(loc="upper right")
+    update_geometry_artists(ax, artists, config)
+    return fig, ax, artists
 
-    text_artist = fig.text(0.02, 0.02, "", family="monospace", fontsize=10)
-    return fig, ax, point_artist, text_artist
+
+def update_geometry_artists(ax: Any, artists: dict[str, Any], config: dict[str, Any]) -> None:
+    visualization = config["visualization"]
+    lip = config["lip"]
+    target = config["target"]
+    guidance = config["guidance"]
+    mount = config["mount"]
+
+    ax.set_xlim(float(visualization["x_min_m"]), float(visualization["x_max_m"]))
+    ax.set_ylim(float(visualization["y_min_m"]), float(visualization["y_max_m"]))
+
+    artists["sensor"].set_offsets(
+        [[float(mount["sensor_x_m"]), float(mount["sensor_y_m"])]]
+    )
+
+    lip_left_x = float(lip["center_x_m"]) - float(lip["width_m"]) / 2.0
+    lip_right_x = float(lip["center_x_m"]) + float(lip["width_m"]) / 2.0
+    lip_tip_y = float(lip["tip_y_m"])
+    artists["lip_line"].set_data([lip_left_x, lip_right_x], [lip_tip_y, lip_tip_y])
+
+    target_left_x, target_right_x = get_target_edges(config)
+    target_forward_y = float(target["forward_y_m"])
+    artists["target_line"].set_data(
+        [target_left_x, target_right_x],
+        [target_forward_y, target_forward_y],
+    )
+
+    target_center_x = float(target["center_x_m"])
+    lip_center_x = float(lip["center_x_m"])
+    artists["target_centerline"].set_xdata([target_center_x, target_center_x])
+    artists["lip_centerline"].set_xdata([lip_center_x, lip_center_x])
+
+    corridor_center = float(guidance["corridor_center_x_m"])
+    corridor_half_width = float(guidance["corridor_half_width_m"])
+    artists["corridor"].set_x(corridor_center - corridor_half_width)
+    artists["corridor"].set_y(lip_tip_y)
+    artists["corridor"].set_width(2.0 * corridor_half_width)
+    artists["corridor"].set_height(
+        max(0.001, float(visualization["y_max_m"]) - lip_tip_y)
+    )
 
 
 def format_metrics(metrics: GeometryMetrics, config: dict[str, Any]) -> str:
     centered_band_m = float(config["guidance"]["centered_band_m"])
     lines = [
+        "Guidance Readout",
         f"Status               : {status_label(metrics.center_offset_m, centered_band_m)}",
         f"Center offset        : {metrics.center_offset_m * 1000:7.1f} mm",
         f"Left clearance       : {metrics.left_clearance_m * 1000:7.1f} mm",
@@ -466,18 +929,66 @@ def preflight_live_port(config: dict[str, Any]) -> None:
     probe.close()
 
 
+def handle_key_event(
+    event: KeyEvent,
+    editor: LiveParameterEditor,
+    point_store: PointStore,
+) -> None:
+    key = event.key
+    if key is None:
+        return
+
+    if key in {"[", ",", "pageup", "p"}:
+        editor.move_selection(-1)
+        return
+    if key in {"]", ".", "pagedown", "n"}:
+        editor.move_selection(1)
+        return
+    if key in {"left", "a", "-", "_"}:
+        if editor.adjust_selected(-1, coarse=False):
+            point_store.clear()
+        return
+    if key in {"right", "d", "+", "=", "plus"}:
+        if editor.adjust_selected(1, coarse=False):
+            point_store.clear()
+        return
+    if key in {"down", "s"}:
+        if editor.adjust_selected(-1, coarse=True):
+            point_store.clear()
+        return
+    if key in {"up", "w"}:
+        if editor.adjust_selected(1, coarse=True):
+            point_store.clear()
+        return
+    if key == "t":
+        if editor.toggle_selected():
+            point_store.clear()
+        return
+    if key == "r":
+        editor.reload_from_file()
+        point_store.clear()
+        return
+    if key == "c":
+        point_store.clear()
+        editor.status_message = "Cleared all plotted points."
+        return
+    if key in {"h", "?"}:
+        editor.toggle_help()
+
+
 def main() -> int:
     args = parse_args()
     config_path = pathlib.Path(args.config).expanduser().resolve()
-    config = load_config(config_path)
+    editor = LiveParameterEditor(config_path=config_path, config=load_config(config_path))
 
     print(f"Using config file: {config_path}")
     print(f"Matplotlib backend: {plt.get_backend()}")
-    print(f"Configured serial port: {config['serial']['port']}")
+    print(f"Configured serial port: {editor.config['serial']['port']}")
+    print("Live editor hotkeys: [ ] , . p n left/right a d - + up/down w s t r c h")
 
     point_store = PointStore(
-        ttl_s=float(config["visualization"]["point_ttl_s"]),
-        bucket_deg=float(config["visualization"]["angle_bucket_deg"]),
+        ttl_s=float(editor.config["visualization"]["point_ttl_s"]),
+        bucket_deg=float(editor.config["visualization"]["angle_bucket_deg"]),
     )
 
     measurement_queue: queue.Queue[dict[str, Any]] = queue.Queue()
@@ -485,27 +996,35 @@ def main() -> int:
     worker: RPLidarWorker | None = None
 
     if not args.simulate:
-        preflight_live_port(config)
+        preflight_live_port(editor.config)
         worker = RPLidarWorker(
-            port=str(config["serial"]["port"]),
-            baudrate=int(config["serial"]["baudrate"]),
-            timeout_s=float(config["serial"]["timeout_s"]),
+            port=str(editor.config["serial"]["port"]),
+            baudrate=int(editor.config["serial"]["baudrate"]),
+            timeout_s=float(editor.config["serial"]["timeout_s"]),
             output_queue=measurement_queue,
             error_queue=error_queue,
         )
         worker.start()
 
-    fig, _ax, point_artist, text_artist = build_plot(config)
+    fig, ax, artists = build_plot(editor.config)
+    fig.canvas.mpl_connect(
+        "key_press_event",
+        lambda event: handle_key_event(event, editor, point_store),
+    )
     plt.show(block=False)
 
-    console_interval_s = float(config["console"]["print_interval_s"])
-    update_period_s = float(config["visualization"]["update_period_s"])
     start_s = time.monotonic()
     last_console_print_s = 0.0
 
     try:
         while True:
             now_s = time.monotonic()
+            config = editor.config
+
+            point_store.ttl_s = float(config["visualization"]["point_ttl_s"])
+            point_store.bucket_deg = float(config["visualization"]["angle_bucket_deg"])
+            console_interval_s = float(config["console"]["print_interval_s"])
+            update_period_s = float(config["visualization"]["update_period_s"])
 
             if worker is not None and not error_queue.empty():
                 raise RuntimeError(
@@ -531,17 +1050,25 @@ def main() -> int:
 
             active_points = point_store.active_points(now_s)
             if active_points:
-                point_artist.set_offsets([[p.x_m, p.y_m] for p in active_points])
+                artists["points"].set_offsets([[p.x_m, p.y_m] for p in active_points])
             else:
-                point_artist.set_offsets(empty_offsets())
+                artists["points"].set_offsets(empty_offsets())
+            artists["points"].set_sizes(
+                np.full(max(1, len(active_points)), float(config["visualization"]["point_size"]))
+            )
+
+            update_geometry_artists(ax, artists, config)
 
             metrics = compute_metrics(config, active_points)
             metrics_text = format_metrics(metrics, config)
-            text_artist.set_text(metrics_text)
+            artists["metrics_text"].set_text(metrics_text)
+            artists["editor_text"].set_text(editor.render_text())
+            artists["status_text"].set_text(editor.status_message)
 
             if (now_s - last_console_print_s) >= console_interval_s:
                 print("")
                 print(metrics_text)
+                print(f"Selected parameter: {editor.selected_spec().label}")
                 last_console_print_s = now_s
 
             fig.canvas.draw_idle()

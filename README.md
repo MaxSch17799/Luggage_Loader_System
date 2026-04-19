@@ -5,6 +5,7 @@ This repo is the starter workspace for the luggage-loader docking prototype.
 Current contents:
 
 - [PROJECT_REFERENCE_AND_ROADMAP.md](/home/max/Desktop/Steer_Clear/PROJECT_REFERENCE_AND_ROADMAP.md)
+- [SURROUNDINGS_AND_WARNING_APPROACHES.md](/home/max/Desktop/Steer_Clear/SURROUNDINGS_AND_WARNING_APPROACHES.md)
 - [GITHUB_SSH_SETUP.md](/home/max/Desktop/Steer_Clear/GITHUB_SSH_SETUP.md)
 - [config/system_parameters.toml](/home/max/Desktop/Steer_Clear/config/system_parameters.toml)
 - [scripts/lidar_diagnostics.py](/home/max/Desktop/Steer_Clear/scripts/lidar_diagnostics.py)
@@ -104,6 +105,40 @@ What you should see:
   - live forward return inside the corridor
 
 Close the window or press `Ctrl+C` to stop it.
+
+## Live Tuning Inside the Demo
+
+The graph window now has a built-in live parameter editor.
+
+Any change you make there is written straight back into:
+
+- [config/system_parameters.toml](/home/max/Desktop/Steer_Clear/config/system_parameters.toml)
+
+This means you can tune the geometry while the demo is running and keep the values for the next launch.
+
+Main controls:
+
+- `[` or `,` or `p`: previous parameter
+- `]` or `.` or `n`: next parameter
+- `left/right` or `a/d` or `- / +`: fine adjust
+- `down/up` or `s/w`: coarse adjust
+- `t`: toggle enum or boolean values
+- `r`: reload the TOML file from disk
+- `c`: clear the plotted points
+- `h` or `?`: hide/show the help panel
+
+Good first parameters to tune:
+
+- `mount.sensor_x_m`
+- `mount.sensor_y_m`
+- `mount.scan_angle_offset_deg`
+- `lip.center_x_m`
+- `lip.width_m`
+- `target.center_x_m`
+- `target.opening_width_m`
+- `target.forward_y_m`
+- `guidance.corridor_center_x_m`
+- `guidance.corridor_half_width_m`
 
 ## Folder Launcher
 

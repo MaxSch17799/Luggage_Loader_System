@@ -7,7 +7,10 @@ import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 import tomllib
+import importlib.util
+import shutil
 
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -32,6 +35,35 @@ def run_step(name: str, command: list[str], env: dict[str, str] | None = None) -
         raise RuntimeError(f"Step failed: {name}")
 
 
+def check_parameter_autosave() -> None:
+    module_path = PROJECT_ROOT / "scripts" / "lidar_live_view.py"
+    spec = importlib.util.spec_from_file_location("lidar_live_view_module", module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Unable to load lidar_live_view.py for autosave verification")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+
+    with tempfile.TemporaryDirectory(prefix="steer_clear_self_check_") as temp_dir:
+        temp_config_path = pathlib.Path(temp_dir) / "system_parameters.toml"
+        shutil.copy2(CONFIG_PATH, temp_config_path)
+
+        original_config = module.load_config(temp_config_path)
+        original_target = float(original_config["target"]["center_x_m"])
+        new_target = round(original_target + 0.123, 6)
+
+        module.save_config_value(temp_config_path, ("target", "center_x_m"), new_target)
+        module.save_config_value(temp_config_path, ("mount", "side"), "left")
+
+        updated_config = module.load_config(temp_config_path)
+
+        if float(updated_config["target"]["center_x_m"]) != new_target:
+            raise RuntimeError("target.center_x_m did not persist to the TOML file")
+        if str(updated_config["mount"]["side"]) != "left":
+            raise RuntimeError("mount.side toggle did not persist to the TOML file")
+
+
 def main() -> int:
     try:
         print(f"[self-check] project root: {PROJECT_ROOT}")
@@ -42,6 +74,11 @@ def main() -> int:
             "[self-check] config loaded successfully for port "
             f"{config['serial']['port']}"
         )
+
+        print("")
+        print("[self-check] Parameter autosave smoke test")
+        check_parameter_autosave()
+        print("[self-check] parameter autosave works on a temporary config copy")
 
         run_step(
             "Python syntax compile",

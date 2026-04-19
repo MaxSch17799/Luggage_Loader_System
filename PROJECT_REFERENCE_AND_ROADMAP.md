@@ -426,6 +426,13 @@ Current local files added for this:
 - [config/system_parameters.toml](/home/max/Desktop/Steer_Clear/config/system_parameters.toml)
 - [scripts/lidar_live_view.py](/home/max/Desktop/Steer_Clear/scripts/lidar_live_view.py)
 - [scripts/show_serial_ports.py](/home/max/Desktop/Steer_Clear/scripts/show_serial_ports.py)
+- [SURROUNDINGS_AND_WARNING_APPROACHES.md](/home/max/Desktop/Steer_Clear/SURROUNDINGS_AND_WARNING_APPROACHES.md)
+
+Current local tooling status:
+
+- the demo now includes live parameter editing inside the graph window
+- geometry changes are autosaved back into the parameter sheet
+- this makes it possible to tune mount location, lip geometry, target geometry, guidance corridor values, and visualization ranges while the demo is running
 
 ## Suggested Later LTE / GNSS Module
 
@@ -524,6 +531,7 @@ Telemetry architecture note for later:
 - build a Python scan logger
 - build a 2D visualization tool
 - keep all geometry in a single editable parameter sheet
+- support live parameter tuning during the visualization session
 - use a simulation mode before the live sensor is fully connected
 - record real approach sequences
 - replay recordings offline
@@ -604,6 +612,10 @@ The best next move is not writing docking logic yet. The best next move is:
 4. verify that the scan plane actually intersects useful geometry
 
 If that geometry looks good, the rest of the software plan is straightforward.
+
+Related design note:
+
+- [SURROUNDINGS_AND_WARNING_APPROACHES.md](/home/max/Desktop/Steer_Clear/SURROUNDINGS_AND_WARNING_APPROACHES.md) now captures researched options for warning boxes, ROI-based door recognition, occupancy grids, and longer-term surroundings awareness.
 
 ## Questions To Answer Next
 
