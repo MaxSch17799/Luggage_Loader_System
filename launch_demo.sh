@@ -99,7 +99,7 @@ while true; do
     echo "Choose how to run the demo:"
     echo "1) Simulate browser demo"
     echo "2) Live LiDAR browser demo"
-    echo "3) Run diagnostics"
+    echo "3) Run system diagnostics"
     echo "4) Show serial ports"
     echo "5) Exit"
     echo ""

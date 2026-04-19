@@ -66,6 +66,19 @@ PARAMETER_ORDER = [
     ("visualization", "update_period_s"),
     ("visualization", "point_size"),
     ("console", "print_interval_s"),
+    ("gps", "enabled"),
+    ("gps", "port"),
+    ("gps", "auto_detect"),
+    ("gps", "baudrate"),
+    ("gps", "timeout_s"),
+    ("gps", "stale_after_s"),
+    ("lcd", "enabled"),
+    ("lcd", "i2c_bus"),
+    ("lcd", "address"),
+    ("lcd", "auto_detect"),
+    ("lcd", "columns"),
+    ("lcd", "rows"),
+    ("lcd", "refresh_interval_s"),
     ("simulation", "enabled"),
     ("simulation", "reveal_depth_m"),
     ("simulation", "wall_point_spacing_m"),
@@ -360,6 +373,115 @@ PARAMETER_METADATA: dict[tuple[str, str], dict[str, Any]] = {
             "This controls how often the program writes guidance numbers into the terminal log. "
             "It does not change the browser UI timing. Lower values print more often and create "
             "more log output; higher values keep the terminal quieter."
+        ),
+    },
+    ("gps", "enabled"): {
+        "description": "Enable or disable GPS integration for the browser demo.",
+        "help_text": (
+            "Turn this on when the NEO-6M GPS module is wired to the Pi and you want the browser "
+            "UI and LCD to show live coordinates. Turn it off if you want the rest of the demo "
+            "to ignore GPS completely while troubleshooting something else."
+        ),
+    },
+    ("gps", "port"): {
+        "description": "Preferred serial device for the GPS module.",
+        "help_text": (
+            "This is the first UART device the demo will try for GPS NMEA sentences. "
+            "For a GPIO-connected GPS on Raspberry Pi 5, /dev/serial0 is usually the right "
+            "starting point. If the GPS status says the port is silent, this is one of the first "
+            "settings to check."
+        ),
+    },
+    ("gps", "auto_detect"): {
+        "description": "Try other likely serial ports if the preferred GPS port is silent.",
+        "help_text": (
+            "When this is true, the demo does not trust only one UART path. "
+            "If the preferred GPS port has no NMEA traffic, the demo also checks other common "
+            "serial names. This makes first-time bring-up easier and gives better diagnostics when "
+            "the Pi-side UART mapping is not what you expected."
+        ),
+    },
+    ("gps", "baudrate"): {
+        "description": "UART baudrate for the GPS module.",
+        "help_text": (
+            "This is the serial speed used when reading NMEA data from the GPS. "
+            "Most NEO-6M boards default to 9600 baud. If you ever reconfigure the GPS module to a "
+            "different baudrate, update this so the browser UI can decode the sentences correctly."
+        ),
+    },
+    ("gps", "timeout_s"): {
+        "description": "Serial read timeout for GPS lines.",
+        "help_text": (
+            "This controls how long the GPS reader waits for a line of serial data before checking "
+            "again. Lower values make the GPS status react faster to missing data. Higher values "
+            "can be a little calmer on slow links."
+        ),
+    },
+    ("gps", "stale_after_s"): {
+        "description": "How long GPS data can go quiet before it is treated as stale.",
+        "help_text": (
+            "If the demo has not received fresh NMEA sentences for longer than this, the GPS state "
+            "changes from active to stale and the software starts trying to recover. This helps "
+            "catch loose wires, disabled UARTs, or GPS modules that stopped talking."
+        ),
+    },
+    ("lcd", "enabled"): {
+        "description": "Enable or disable the 20x4 LCD output.",
+        "help_text": (
+            "Turn this on when the HD44780 LCD with I2C backpack is connected and you want the "
+            "demo to write forward distance and GPS coordinates to it. Turn it off if you want to "
+            "leave the LCD untouched while you work on the rest of the system."
+        ),
+    },
+    ("lcd", "i2c_bus"): {
+        "description": "Preferred I2C bus number for the LCD backpack.",
+        "help_text": (
+            "This is the first Linux I2C bus the demo will try for the LCD. "
+            "For the Raspberry Pi header, that is normally bus 1 after I2C is enabled in "
+            "raspi-config and the Pi has been rebooted. If the LCD status says the bus is missing, "
+            "the Pi-side I2C interface probably still needs enabling."
+        ),
+    },
+    ("lcd", "address"): {
+        "description": "Preferred I2C address for the LCD backpack.",
+        "help_text": (
+            "This is the backpack I2C address as a decimal number. "
+            "39 means 0x27, which is very common for these LCD backpacks. "
+            "Another common value is 63, which means 0x3F. If the display is detected on a "
+            "different address, update this so the LCD reconnects faster."
+        ),
+    },
+    ("lcd", "auto_detect"): {
+        "description": "Try common buses and common LCD addresses automatically.",
+        "help_text": (
+            "When this is true, the demo will not give up immediately if the configured LCD bus "
+            "or address is wrong. It will also try common alternatives and report what it found. "
+            "This is helpful during first wiring and troubleshooting."
+        ),
+    },
+    ("lcd", "columns"): {
+        "description": "LCD width in characters.",
+        "help_text": (
+            "This tells the demo how many text columns the LCD has. "
+            "For your current display this should stay at 20. Only change it if you move the code "
+            "to a different LCD model later."
+        ),
+    },
+    ("lcd", "rows"): {
+        "description": "LCD height in text rows.",
+        "help_text": (
+            "This tells the demo how many text rows the LCD has. "
+            "For your current display this should stay at 4. The demo formats four lines of text "
+            "around that geometry."
+        ),
+    },
+    ("lcd", "refresh_interval_s"): {
+        "description": "How often the LCD text is refreshed.",
+        "help_text": (
+            "This controls how often the software rewrites the LCD lines. "
+            "A shorter interval makes the display react faster, but also creates more I2C traffic. "
+            "A longer interval is calmer and usually perfectly fine for a slow human-readable "
+            "operator display."
         ),
     },
     ("simulation", "enabled"): {

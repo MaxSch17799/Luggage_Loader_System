@@ -15,6 +15,7 @@ from typing import Any
 from flask import Flask, jsonify, render_template, request
 from werkzeug.serving import make_server
 
+from hardware_support import GPSSnapshot, LCDController, GPSWorker
 from lidar_live_view import (
     DEFAULT_CONFIG_PATH,
     LiveParameterEditor,
@@ -61,12 +62,92 @@ class DemoSession:
         self.worker: RPLidarWorker | None = None
         self.last_worker_error: str | None = None
         self.shutdown_requested = False
+        self.gps_worker: GPSWorker | None = None
+        self.lcd_controller = LCDController()
+
+        self.start_gps()
 
         if not simulate:
             self.start_lidar()
 
+        self.editor.status_message = (
+            "Browser UI ready. Parameters autosave live, and hardware status is shown below."
+        )
+
     def stop(self) -> None:
         self.stop_lidar(update_status=False)
+        self.stop_gps()
+        self.lcd_controller.shutdown(clear=True)
+
+    def start_gps(self) -> str:
+        gps_config = self.editor.config.get("gps", {})
+        if not bool(gps_config.get("enabled", True)):
+            self.editor.status_message = "GPS is disabled in the parameter sheet."
+            return self.editor.status_message
+
+        if self.gps_worker is not None and self.gps_worker.is_alive():
+            self.editor.status_message = "GPS is already running."
+            return self.editor.status_message
+
+        self.gps_worker = GPSWorker(
+            gps_config=gps_config,
+            excluded_ports={str(self.editor.config["serial"]["port"])},
+        )
+        self.gps_worker.start()
+        self.editor.status_message = "GPS reader started."
+        return self.editor.status_message
+
+    def stop_gps(self) -> str:
+        if self.gps_worker is not None:
+            self.gps_worker.stop()
+            self.gps_worker.join(timeout=2.0)
+            self.gps_worker = None
+        self.editor.status_message = "GPS reader stopped."
+        return self.editor.status_message
+
+    def restart_gps(self) -> str:
+        gps_config = self.editor.config.get("gps", {})
+        if not bool(gps_config.get("enabled", True)):
+            self.stop_gps()
+            self.editor.status_message = "GPS disabled and stopped."
+            return self.editor.status_message
+
+        self.stop_gps()
+        return self.start_gps()
+
+    def gps_snapshot(self) -> GPSSnapshot:
+        if self.gps_worker is None:
+            gps_config = self.editor.config.get("gps", {})
+            return GPSSnapshot(
+                enabled=bool(gps_config.get("enabled", True)),
+                running=False,
+                connected=False,
+                port=str(gps_config.get("port", "/dev/serial0")),
+                baudrate=int(gps_config.get("baudrate", 9600)),
+                status="GPS reader not running.",
+                error=None,
+                has_fix=False,
+                latitude=None,
+                longitude=None,
+                altitude_m=None,
+                satellites=None,
+                fix_quality=None,
+                sentence_count=0,
+                last_sentence_age_s=None,
+                last_fix_age_s=None,
+                last_sentence_type=None,
+            )
+        return self.gps_worker.snapshot()
+
+    def handle_hardware_setting_change(self, section: str) -> None:
+        if section == "gps":
+            self.restart_gps()
+            return
+        if section == "lcd":
+            self.lcd_controller.invalidate()
+            self.editor.status_message = (
+                "LCD settings saved. The browser demo will retry the LCD automatically."
+            )
 
     def lidar_available(self) -> bool:
         return not self.simulate
@@ -127,8 +208,7 @@ class DemoSession:
 
     def request_shutdown(self) -> str:
         self.shutdown_requested = True
-        if self.lidar_available():
-            self.stop_lidar(update_status=False)
+        self.stop()
         self.editor.status_message = "Stopping demo and shutting down the browser server."
         return self.editor.status_message
 
@@ -277,6 +357,13 @@ class DemoSession:
             active_points = self.point_store.active_points(now_s)
             metrics = compute_metrics(config, active_points)
             centered_band_m = float(config["guidance"]["centered_band_m"])
+            gps_snapshot = self.gps_snapshot()
+            self.lcd_controller.update(
+                config.get("lcd", {}),
+                metrics.live_forward_distance_m,
+                gps_snapshot,
+            )
+            lcd_payload = self.lcd_controller.snapshot().to_payload()
 
             return {
                 "mode": self.mode_label,
@@ -293,6 +380,8 @@ class DemoSession:
                         else "Turn LiDAR On"
                     ),
                 },
+                "gps": gps_snapshot.to_payload(),
+                "lcd": lcd_payload,
                 "parameterValues": self._current_values(),
                 "metrics": {
                     "status": status_label(metrics.center_offset_m, centered_band_m),
@@ -312,6 +401,7 @@ class DemoSession:
             changed = self.editor.set_value_from_text((section, key), raw_value)
             if changed:
                 self.point_store.clear()
+                self.handle_hardware_setting_change(section)
             return changed, self.editor.status_message
 
     def nudge_parameter(
@@ -331,6 +421,8 @@ class DemoSession:
         with self.lock:
             self.editor.reload_from_file()
             self.point_store.clear()
+            self.handle_hardware_setting_change("gps")
+            self.handle_hardware_setting_change("lcd")
             return self.editor.status_message
 
     def clear_points(self) -> str:

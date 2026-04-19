@@ -35,7 +35,7 @@ sensor_x_m = 0.45
 # Approximate fore/aft position of the LiDAR relative to the lip tip plane.
 # Negative means the LiDAR is behind the lip.
 # You said roughly 1.5 to 2.0 m behind the lip, so this starts at -1.75 m.
-sensor_y_m = -1.75
+sensor_y_m = -0.75
 
 # Approximate height of the LiDAR above the belt.
 # This is not yet used in the 2D top-view plot, but it belongs in the parameter sheet.
@@ -135,6 +135,52 @@ point_size = 10
 [console]
 # How often to print the current readout in the terminal.
 print_interval_s = 1.0
+
+[gps]
+# The GPS module is connected to the Pi GPIO UART.
+
+# Set this to false if you want the browser demo to ignore the GPS entirely.
+enabled = true
+
+# Preferred UART device for the GPS.
+# On this Pi, /dev/serial0 is the best first choice for the GPIO header UART.
+port = "/dev/serial0"
+
+# When true, the demo will try other likely serial ports if the preferred one is silent.
+auto_detect = true
+
+# NEO-6M modules typically default to 9600 baud.
+baudrate = 9600
+
+# Serial timeout for GPS line reads in seconds.
+timeout_s = 0.5
+
+# If no fresh NMEA sentences arrive for longer than this, the GPS status goes stale.
+stale_after_s = 3.0
+
+[lcd]
+# The 20x4 HD44780 LCD uses an I2C backpack.
+
+# Set this to false if you want the demo to leave the LCD alone.
+enabled = true
+
+# Preferred I2C bus for the Raspberry Pi GPIO header.
+# This is usually bus 1 after I2C is enabled in raspi-config and the Pi is rebooted.
+i2c_bus = 1
+
+# Common backpack address for the LCD.
+# 39 means 0x27. Another common value is 63 (0x3F).
+address = 39
+
+# When true, the demo will try common buses and common LCD addresses if the preferred one fails.
+auto_detect = true
+
+# LCD geometry.
+columns = 20
+rows = 4
+
+# How often to refresh the LCD text.
+refresh_interval_s = 1.0
 
 [simulation]
 # A simple mock scene so you can practice with the visualizer before the sensor is connected.

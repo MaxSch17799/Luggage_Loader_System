@@ -88,6 +88,7 @@ def main() -> int:
                 "py_compile",
                 "scripts/lidar_live_view.py",
                 "scripts/lidar_web_ui.py",
+                "scripts/hardware_support.py",
                 "scripts/show_serial_ports.py",
                 "scripts/lidar_diagnostics.py",
                 "scripts/self_check.py",

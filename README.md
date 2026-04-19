@@ -41,6 +41,8 @@ This is the main file you should tweak as you learn the real geometry.
 Important sections:
 
 - `[serial]`: LiDAR port and baud rate
+- `[gps]`: UART GPS settings and stale-data handling
+- `[lcd]`: I2C LCD settings and refresh rate
 - `[mount]`: where the LiDAR sits on the loader
 - `[lip]`: assumed lip geometry
 - `[target]`: guessed opening position and width
@@ -97,6 +99,7 @@ What you should see:
 - a parameter sidebar with editable fields
 - a live scene plot in the browser
 - cards showing center offset, left clearance, right clearance, and forward return
+- a hardware status row for LiDAR, GPS, and LCD
 
 Press `Ctrl+C` in the terminal to stop the server.
 
@@ -123,6 +126,8 @@ How it works:
 - `Reload From TOML` reloads the file from disk
 - `Clear Points` clears the current plot points
 - `Close Demo` stops the demo server and requests LiDAR shutdown
+- the plot now overlays the live forward-distance readout and GPS coordinates
+- when enabled, the LCD shows forward distance plus latitude and longitude
 
 Good first parameters to tune:
 
@@ -213,7 +218,22 @@ This checks:
 - the configured serial port
 - serial permissions
 - pyserial open/close
+- GPS UART visibility and NMEA traffic
+- visible I2C buses and common LCD addresses
 - a short live RPLIDAR protocol test
+
+## GPS And LCD Notes
+
+The browser demo now tries to use:
+
+- `gps.port`, which defaults to `/dev/serial0`
+- `lcd.i2c_bus`, which defaults to `1`
+- `lcd.address`, which defaults to `39` (`0x27`)
+
+Important Raspberry Pi setup note:
+
+- if `scripts/lidar_diagnostics.py` says `i2c-1` is missing, enable `I2C` in `sudo raspi-config` and reboot
+- if the GPS shows no NMEA sentences, enable the serial hardware UART in `sudo raspi-config`, keep the serial login shell disabled, and reboot
 
 ## Self-Check
 

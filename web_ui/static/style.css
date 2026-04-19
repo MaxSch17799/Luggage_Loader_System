@@ -147,6 +147,79 @@ button:disabled {
   display: none;
 }
 
+.hardware-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.hardware-card {
+  background: var(--panel);
+  border: 1px solid rgba(216, 208, 191, 0.75);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+  padding: 14px 16px;
+}
+
+.hardware-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.hardware-title {
+  font-weight: 800;
+}
+
+.hardware-badge {
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(182, 121, 24, 0.12);
+  color: var(--warning);
+}
+
+.hardware-badge.good {
+  background: rgba(36, 107, 59, 0.12);
+  color: var(--good);
+}
+
+.hardware-badge.warning {
+  background: rgba(182, 121, 24, 0.12);
+  color: var(--warning);
+}
+
+.hardware-badge.danger {
+  background: rgba(177, 68, 47, 0.12);
+  color: var(--danger);
+}
+
+.hardware-detail,
+.hardware-extra,
+.hardware-error {
+  line-height: 1.45;
+  font-size: 0.92rem;
+}
+
+.hardware-detail,
+.hardware-extra {
+  color: var(--muted);
+}
+
+.hardware-extra {
+  margin-top: 6px;
+}
+
+.hardware-error {
+  margin-top: 10px;
+  color: var(--danger);
+}
+
 .content-grid {
   display: grid;
   grid-template-columns: 420px minmax(0, 1fr);
@@ -464,6 +537,10 @@ code {
 }
 
 @media (max-width: 1200px) {
+  .hardware-grid {
+    grid-template-columns: 1fr;
+  }
+
   .content-grid {
     grid-template-columns: 1fr;
   }

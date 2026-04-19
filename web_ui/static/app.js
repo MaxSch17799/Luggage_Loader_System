@@ -11,6 +11,7 @@
 
   const sectionsRoot = document.getElementById("parameterSections");
   const metricsRoot = document.getElementById("metricsGrid");
+  const hardwareGridEl = document.getElementById("hardwareGrid");
   const statusMessageEl = document.getElementById("statusMessage");
   const workerErrorEl = document.getElementById("workerError");
   const pointCounterEl = document.getElementById("pointCounter");
@@ -222,6 +223,100 @@
     });
   }
 
+  function hardwareTone(status) {
+    const text = String(status || "").toLowerCase();
+    if (text.includes("fix") || text.includes("running") || text.includes("updated") || text.includes("connected")) {
+      return "good";
+    }
+    if (text.includes("error") || text.includes("failed") || text.includes("missing") || text.includes("offline")) {
+      return "danger";
+    }
+    return "warning";
+  }
+
+  function formatOptionalNumber(value, digits = 2) {
+    if (value == null || Number.isNaN(Number(value))) {
+      return "n/a";
+    }
+    return Number(value).toFixed(digits);
+  }
+
+  function renderHardware(state) {
+    const cards = [
+      {
+        title: "LiDAR",
+        status: state.lidar?.available
+          ? (state.lidar.running ? "Running" : "Stopped")
+          : "Simulation mode",
+        detail: state.lidar?.available
+          ? `Port state: ${state.lidar.running ? "streaming" : "idle"}`
+          : "No physical LiDAR in simulate mode.",
+        extra: state.workerError ? "Traceback available in the red error strip." : null,
+        error: state.workerError || null,
+      },
+      {
+        title: "GPS",
+        status: state.gps?.status || "GPS status unavailable",
+        detail: `Port ${state.gps?.port || "n/a"} @ ${state.gps?.baudrate || "n/a"} baud`,
+        extra: state.gps?.hasFix
+          ? `Lat ${formatOptionalNumber(state.gps.latitude, 6)}, Lon ${formatOptionalNumber(state.gps.longitude, 6)}`
+          : `Sentences ${state.gps?.sentenceCount ?? 0}, sats ${state.gps?.satellites ?? "n/a"}`,
+        error: state.gps?.error || null,
+      },
+      {
+        title: "LCD",
+        status: state.lcd?.status || "LCD status unavailable",
+        detail:
+          state.lcd?.busNumber != null
+            ? `i2c-${state.lcd.busNumber} at ${state.lcd.addressHex || "n/a"}`
+            : `Configured bus ${state.parameterValues?.["lcd.i2c_bus"] ?? "n/a"}`,
+        extra:
+          Array.isArray(state.lcd?.detectedBuses) && state.lcd.detectedBuses.length > 0
+            ? `Visible I2C buses: ${state.lcd.detectedBuses.map((bus) => `i2c-${bus}`).join(", ")}`
+            : "No usable I2C bus detected yet.",
+        error: state.lcd?.error || null,
+      },
+    ];
+
+    hardwareGridEl.innerHTML = "";
+    cards.forEach((card) => {
+      const article = document.createElement("article");
+      article.className = "hardware-card";
+
+      const top = document.createElement("div");
+      top.className = "hardware-card-top";
+
+      const title = document.createElement("div");
+      title.className = "hardware-title";
+      title.textContent = card.title;
+
+      const badge = document.createElement("div");
+      badge.className = `hardware-badge ${hardwareTone(card.status)}`;
+      badge.textContent = card.status;
+
+      top.append(title, badge);
+
+      const detail = document.createElement("div");
+      detail.className = "hardware-detail";
+      detail.textContent = card.detail;
+
+      const extra = document.createElement("div");
+      extra.className = "hardware-extra";
+      extra.textContent = card.extra || "";
+
+      article.append(top, detail, extra);
+
+      if (card.error) {
+        const error = document.createElement("div");
+        error.className = "hardware-error";
+        error.textContent = String(card.error).split("\n")[0];
+        article.append(error);
+      }
+
+      hardwareGridEl.append(article);
+    });
+  }
+
   function createControl(spec) {
     const wrapper = document.createElement("div");
     wrapper.className = "param-controls";
@@ -422,7 +517,7 @@
 
   async function closeDemo() {
     const confirmed = window.confirm(
-      "Close the Steer Clear demo, stop the LiDAR, and shut down the browser server?"
+      "Close the Steer Clear demo, stop the background hardware workers, and shut down the browser server?"
     );
     if (!confirmed) {
       return;
@@ -434,7 +529,7 @@
       document.body.innerHTML = `
         <div style="padding:40px;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
           <h1 style="margin-top:0;">Steer Clear demo stopped</h1>
-          <p>The background demo server has been shut down and the LiDAR stop request was sent.</p>
+          <p>The background demo server has been shut down, the LiDAR stop request was sent, the GPS reader was stopped, and the LCD was released.</p>
           <p>You can now close this tab or return to the launcher terminal.</p>
         </div>
       `;
@@ -651,7 +746,58 @@
     });
     ctx.restore();
 
+    drawPlotOverlay(ctx, rect, state);
+
     pointCounterEl.textContent = `${plot.pointCount} live points, showing ${plot.renderedPointCount}`;
+  }
+
+  function drawPlotOverlay(ctx, rect, state) {
+    const lines = [];
+    if (state.metrics?.liveForwardReturnMm != null) {
+      lines.push(`Forward: ${Number(state.metrics.liveForwardReturnMm).toFixed(1)} mm`);
+    } else {
+      lines.push("Forward: no live hit");
+    }
+
+    if (state.gps?.hasFix && state.gps?.latitude != null && state.gps?.longitude != null) {
+      lines.push(`Lat: ${Number(state.gps.latitude).toFixed(6)}`);
+      lines.push(`Lon: ${Number(state.gps.longitude).toFixed(6)}`);
+      lines.push(`GPS: fix, sats ${state.gps.satellites ?? "n/a"}`);
+    } else {
+      lines.push(`GPS: ${state.gps?.status || "unavailable"}`);
+    }
+
+    const boxWidth = 252;
+    const lineHeight = 18;
+    const boxHeight = 18 + lines.length * lineHeight + 12;
+    const x = rect.width - boxWidth - 18;
+    const y = 18;
+
+    ctx.save();
+    ctx.fillStyle = "rgba(255, 253, 248, 0.92)";
+    ctx.strokeStyle = "rgba(216, 208, 191, 0.92)";
+    ctx.lineWidth = 1.2;
+    roundRect(ctx, x, y, boxWidth, boxHeight, 14);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = "#2a2a24";
+    ctx.font = "13px sans-serif";
+    lines.forEach((line, index) => {
+      ctx.fillText(line, x + 14, y + 24 + index * lineHeight);
+    });
+    ctx.restore();
+  }
+
+  function roundRect(ctx, x, y, width, height, radius) {
+    const r = Math.min(radius, width / 2, height / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + width, y, x + width, y + height, r);
+    ctx.arcTo(x + width, y + height, x, y + height, r);
+    ctx.arcTo(x, y + height, x, y, r);
+    ctx.arcTo(x, y, x + width, y, r);
+    ctx.closePath();
   }
 
   async function pollState(force = false) {
@@ -673,6 +819,7 @@
       syncControls(lastState.parameterValues);
       syncToolbar(lastState);
       renderMetrics(lastState.metrics);
+      renderHardware(lastState);
       drawScene(lastState);
     } catch (error) {
       setStatus(`State update failed: ${error.message}`);
