@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Launch Steer Clear Demo
+Comment=Start the Steer Clear LiDAR demo launcher
+Path=/home/max/Desktop/Steer_Clear
+Exec=/home/max/Desktop/Steer_Clear/launch_demo.sh
+Terminal=true
+Categories=Development;
+

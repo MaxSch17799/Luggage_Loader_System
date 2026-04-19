@@ -5,9 +5,12 @@ This repo is the starter workspace for the luggage-loader docking prototype.
 Current contents:
 
 - [PROJECT_REFERENCE_AND_ROADMAP.md](/home/max/Desktop/Steer_Clear/PROJECT_REFERENCE_AND_ROADMAP.md)
+- [GITHUB_SSH_SETUP.md](/home/max/Desktop/Steer_Clear/GITHUB_SSH_SETUP.md)
 - [config/system_parameters.toml](/home/max/Desktop/Steer_Clear/config/system_parameters.toml)
 - [scripts/lidar_live_view.py](/home/max/Desktop/Steer_Clear/scripts/lidar_live_view.py)
 - [scripts/show_serial_ports.py](/home/max/Desktop/Steer_Clear/scripts/show_serial_ports.py)
+- [launch_demo.sh](/home/max/Desktop/Steer_Clear/launch_demo.sh)
+- [Launch Steer Clear Demo.desktop](</home/max/Desktop/Steer_Clear/Launch Steer Clear Demo.desktop>)
 
 ## Why USB First Instead of 4-Pin UART?
 
@@ -100,6 +103,29 @@ What you should see:
 
 Close the window or press `Ctrl+C` to stop it.
 
+## Folder Launcher
+
+There are now two launcher files in the repo root:
+
+- [launch_demo.sh](/home/max/Desktop/Steer_Clear/launch_demo.sh)
+- [Launch Steer Clear Demo.desktop](</home/max/Desktop/Steer_Clear/Launch Steer Clear Demo.desktop>)
+
+If you are in the file manager on Raspberry Pi OS, try double-clicking:
+
+- `Launch Steer Clear Demo.desktop`
+
+If that does not launch, open a terminal in the folder and run:
+
+```bash
+./launch_demo.sh
+```
+
+The launcher lets you choose:
+
+- simulate demo
+- live LiDAR demo
+- show serial ports
+
 ## Run With the Real LiDAR
 
 1. Plug the RPLIDAR C1 into the Raspberry Pi by USB.
@@ -146,10 +172,16 @@ This demo intentionally builds on existing code instead of reimplementing everyt
 
 ## Git Workflow
 
-The repo remote should be:
+The easiest long-term setup is SSH.
+
+See:
+
+- [GITHUB_SSH_SETUP.md](/home/max/Desktop/Steer_Clear/GITHUB_SSH_SETUP.md)
+
+After SSH setup, the repo remote should be:
 
 ```bash
-git remote add origin https://github.com/MaxSch17799/Luggage_Loader_System.git
+git remote set-url origin git@github.com:MaxSch17799/Luggage_Loader_System.git
 ```
 
 Recommended habit:
