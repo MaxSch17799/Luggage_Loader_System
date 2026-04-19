@@ -1,0 +1,155 @@
+# Steer Clear parameter sheet
+#
+# Coordinate system used by the demo:
+# - x axis: positive to the RIGHT side of the belt when viewed from the cockpit
+# - y axis: positive FORWARD toward the aircraft
+# - origin: lip centerline at the lip tip plane
+#
+# Edit this file whenever you want to tune the assumed geometry.
+# The Python visualizer reads these values on startup.
+
+[metadata]
+project_name = "Steer Clear Luggage Loader Prototype"
+parameter_file_version = 1
+
+[serial]
+# The USB serial device for the LiDAR.
+# Typical values on Raspberry Pi OS are /dev/ttyUSB0 or /dev/ttyUSB1.
+port = "/dev/ttyUSB0"
+
+# The SLAMTEC C1 user manual lists 460800 baud.
+baudrate = 460800
+
+# Serial timeout for reads in seconds.
+timeout_s = 0.2
+
+[mount]
+# Side of the belt where the LiDAR is mounted.
+side = "right"
+
+# Approximate horizontal position of the LiDAR center relative to lip centerline.
+# Positive means the sensor sits to the right of the belt centerline.
+# This is a placeholder and should be measured later.
+sensor_x_m = 0.45
+
+# Approximate fore/aft position of the LiDAR relative to the lip tip plane.
+# Negative means the LiDAR is behind the lip.
+# You said roughly 1.5 to 2.0 m behind the lip, so this starts at -1.75 m.
+sensor_y_m = -1.75
+
+# Approximate height of the LiDAR above the belt.
+# This is not yet used in the 2D top-view plot, but it belongs in the parameter sheet.
+sensor_z_m = 0.75
+
+# Rotation offset used to align the LiDAR's internal 0-degree direction to the loader frame.
+# Tune this if the plotted points appear rotated incorrectly.
+# With the current convention:
+# - 0 deg means the LiDAR's 0-degree ray points forward along the loader
+# - +90 deg points to the right
+scan_angle_offset_deg = 0.0
+
+# Placeholder pitch value for future use.
+pitch_deg = 0.0
+
+[lip]
+# The loader lip is treated as known fixed geometry.
+
+# Lip centerline position in the loader frame.
+center_x_m = 0.0
+
+# The lip tip plane defines y = 0.0 in the loader frame.
+tip_y_m = 0.0
+
+# Approximate usable lip width.
+# This is a made-up starting value and should be measured later.
+width_m = 0.70
+
+[target]
+# This section describes the guessed target opening geometry.
+# These are tuning parameters for mock setup and early calibration work.
+
+# Desired opening centerline in the loader frame.
+# Positive moves the target to the right of the lip centerline.
+center_x_m = 0.00
+
+# Approximate opening width.
+opening_width_m = 0.90
+
+# Approximate forward distance from the lip tip plane to the target plane.
+forward_y_m = 2.50
+
+# Fine trim for the left opening edge.
+# This lets you tune an asymmetric opening without changing the centerline value.
+left_edge_trim_m = 0.00
+
+# Fine trim for the right opening edge.
+right_edge_trim_m = 0.00
+
+[guidance]
+# The visualizer computes three main geometry values from the current parameter sheet:
+# - center offset
+# - left clearance
+# - right clearance
+#
+# It also computes a live "nearest forward return" from points inside a configurable corridor.
+
+# The corridor used for the live forward-distance readout is centered here.
+# If you leave this at 0.0, it tracks the loader centerline.
+corridor_center_x_m = 0.00
+
+# Half-width of the corridor used for the live forward-distance readout.
+corridor_half_width_m = 0.25
+
+# If the absolute center offset is smaller than this, the text readout says CENTERED.
+centered_band_m = 0.03
+
+[filtering]
+# Ignore points with quality below this threshold.
+min_quality = 5
+
+# Ignore returns closer than this.
+min_range_m = 0.10
+
+# Ignore returns farther than this.
+max_range_m = 8.00
+
+[visualization]
+# Plot area limits in the loader frame.
+x_min_m = -2.0
+x_max_m = 2.0
+y_min_m = -2.5
+y_max_m = 6.0
+
+# How long points stay visible on the plot.
+point_ttl_s = 0.75
+
+# Bucket size used to keep only the latest point near each angle.
+angle_bucket_deg = 0.50
+
+# Graph update interval.
+update_period_s = 0.05
+
+# Dot size for scan points.
+point_size = 10
+
+[console]
+# How often to print the current readout in the terminal.
+print_interval_s = 1.0
+
+[simulation]
+# A simple mock scene so you can practice with the visualizer before the sensor is connected.
+
+# When true, the script can be run with --simulate to show a fake docking scene.
+enabled = true
+
+# Depth of the simulated reveal behind the opening line.
+reveal_depth_m = 0.40
+
+# Horizontal spacing between simulated wall points.
+wall_point_spacing_m = 0.05
+
+# Random positional noise added to simulated points.
+noise_m = 0.01
+
+# Number of random clutter points added in the background.
+background_clutter_points = 20

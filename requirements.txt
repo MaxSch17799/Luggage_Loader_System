@@ -1,0 +1,4 @@
+matplotlib>=3.10
+pyserial>=3.5
+rplidarc1>=0.1.3
+
