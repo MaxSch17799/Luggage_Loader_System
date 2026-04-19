@@ -7,6 +7,8 @@ Current contents:
 - [PROJECT_REFERENCE_AND_ROADMAP.md](/home/max/Desktop/Steer_Clear/PROJECT_REFERENCE_AND_ROADMAP.md)
 - [GITHUB_SSH_SETUP.md](/home/max/Desktop/Steer_Clear/GITHUB_SSH_SETUP.md)
 - [config/system_parameters.toml](/home/max/Desktop/Steer_Clear/config/system_parameters.toml)
+- [scripts/lidar_diagnostics.py](/home/max/Desktop/Steer_Clear/scripts/lidar_diagnostics.py)
+- [scripts/self_check.py](/home/max/Desktop/Steer_Clear/scripts/self_check.py)
 - [scripts/lidar_live_view.py](/home/max/Desktop/Steer_Clear/scripts/lidar_live_view.py)
 - [scripts/show_serial_ports.py](/home/max/Desktop/Steer_Clear/scripts/show_serial_ports.py)
 - [launch_demo.sh](/home/max/Desktop/Steer_Clear/launch_demo.sh)
@@ -124,7 +126,14 @@ The launcher lets you choose:
 
 - simulate demo
 - live LiDAR demo
+- run diagnostics
 - show serial ports
+
+Every launcher run now writes a log file into:
+
+- `logs/`
+
+If something fails, copy the path of the `.log` file or paste its contents back to me.
 
 ## Run With the Real LiDAR
 
@@ -152,6 +161,39 @@ This runs the visualizer for only 5 seconds:
 ```bash
 python scripts/lidar_live_view.py --simulate --duration-seconds 5
 ```
+
+## Diagnostics
+
+If live mode fails, run:
+
+```bash
+cd /home/max/Desktop/Steer_Clear
+source .venv/bin/activate
+python scripts/lidar_diagnostics.py
+```
+
+This checks:
+
+- the configured serial port
+- serial permissions
+- pyserial open/close
+- a short live RPLIDAR protocol test
+
+## Self-Check
+
+Before calling the demo ready, this repo now includes a quick self-check:
+
+```bash
+cd /home/max/Desktop/Steer_Clear
+source .venv/bin/activate
+python scripts/self_check.py
+```
+
+This runs:
+
+- Python syntax compile
+- simulated viewer smoke test
+- non-invasive diagnostics smoke test
 
 ## If You Get a Serial Permission Error
 

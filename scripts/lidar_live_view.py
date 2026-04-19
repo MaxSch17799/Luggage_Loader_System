@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import math
+import os
 import pathlib
 import queue
 import random
@@ -18,6 +19,8 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+import numpy as np
+import serial
 
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -419,6 +422,10 @@ def format_metrics(metrics: GeometryMetrics, config: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def empty_offsets() -> np.ndarray:
+    return np.empty((0, 2), dtype=float)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Steer Clear RPLIDAR C1 live viewer")
     parser.add_argument(
@@ -440,10 +447,33 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
+def preflight_live_port(config: dict[str, Any]) -> None:
+    port = pathlib.Path(str(config["serial"]["port"]))
+    if not port.exists():
+        raise FileNotFoundError(
+            f"Configured serial port does not exist: {port}\n"
+            "Run scripts/show_serial_ports.py or the launcher diagnostics first."
+        )
+    if not os.access(port, os.R_OK | os.W_OK):
+        raise PermissionError(
+            f"Configured serial port exists but is not readable/writable: {port}"
+        )
+    probe = serial.Serial(
+        port=str(port),
+        baudrate=int(config["serial"]["baudrate"]),
+        timeout=float(config["serial"]["timeout_s"]),
+    )
+    probe.close()
+
+
+def main() -> int:
     args = parse_args()
     config_path = pathlib.Path(args.config).expanduser().resolve()
     config = load_config(config_path)
+
+    print(f"Using config file: {config_path}")
+    print(f"Matplotlib backend: {plt.get_backend()}")
+    print(f"Configured serial port: {config['serial']['port']}")
 
     point_store = PointStore(
         ttl_s=float(config["visualization"]["point_ttl_s"]),
@@ -455,6 +485,7 @@ def main() -> None:
     worker: RPLidarWorker | None = None
 
     if not args.simulate:
+        preflight_live_port(config)
         worker = RPLidarWorker(
             port=str(config["serial"]["port"]),
             baudrate=int(config["serial"]["baudrate"]),
@@ -477,7 +508,9 @@ def main() -> None:
             now_s = time.monotonic()
 
             if worker is not None and not error_queue.empty():
-                raise RuntimeError(error_queue.get_nowait())
+                raise RuntimeError(
+                    "LiDAR worker crashed.\n\n" + error_queue.get_nowait()
+                )
 
             if args.simulate:
                 for point in simulate_points(config, now_s):
@@ -500,7 +533,7 @@ def main() -> None:
             if active_points:
                 point_artist.set_offsets([[p.x_m, p.y_m] for p in active_points])
             else:
-                point_artist.set_offsets([])
+                point_artist.set_offsets(empty_offsets())
 
             metrics = compute_metrics(config, active_points)
             metrics_text = format_metrics(metrics, config)
@@ -519,6 +552,7 @@ def main() -> None:
                 break
             if not plt.fignum_exists(fig.number):
                 break
+        return 0
     finally:
         if worker is not None:
             worker.stop()
@@ -526,5 +560,15 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
-
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        print("\nInterrupted by user.")
+        raise SystemExit(130)
+    except Exception:
+        print("")
+        print("Steer Clear live viewer failed with an exception.")
+        print("Copy the traceback below and send it back to me.")
+        print("")
+        print(traceback.format_exc())
+        raise SystemExit(1)
