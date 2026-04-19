@@ -229,9 +229,43 @@ button.secondary {
   min-width: 0;
 }
 
+.param-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
 .param-label {
   font-weight: 700;
-  margin-bottom: 4px;
+}
+
+.info-button {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  min-height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(11, 125, 105, 0.35);
+  background: rgba(11, 125, 105, 0.08);
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 800;
+  box-shadow: none;
+}
+
+.info-button:hover {
+  transform: none;
+  background: rgba(11, 125, 105, 0.16);
+}
+
+.info-button.active {
+  background: var(--accent);
+  color: white;
 }
 
 .param-path {
@@ -244,6 +278,18 @@ button.secondary {
   color: var(--muted);
   line-height: 1.45;
   font-size: 0.92rem;
+}
+
+.param-help {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(11, 125, 105, 0.07);
+  border: 1px solid rgba(11, 125, 105, 0.14);
+  color: #31564d;
+  line-height: 1.5;
+  font-size: 0.9rem;
+  white-space: pre-wrap;
 }
 
 .param-controls {

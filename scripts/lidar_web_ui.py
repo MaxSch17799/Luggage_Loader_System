@@ -98,6 +98,7 @@ class DemoSession:
                         "key": spec.key,
                         "path": f"{spec.section}.{spec.key}",
                         "description": spec.description,
+                        "helpText": spec.help_text,
                         "kind": kind,
                         "fineStep": spec.fine_step,
                         "coarseStep": spec.coarse_step,

@@ -116,6 +116,7 @@ How it works:
 - type a new value
 - press `Enter` or click away to apply it live
 - booleans and enums appear as dropdowns
+- each parameter now has a small `i` button for a more intuitive explanation
 - `-` and `+` do fine nudges
 - `--` and `++` do coarse nudges
 - `Reload From TOML` reloads the file from disk

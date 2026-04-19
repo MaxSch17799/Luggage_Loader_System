@@ -78,89 +78,329 @@ PARAMETER_METADATA: dict[tuple[str, str], dict[str, Any]] = {
     ("mount", "side"): {
         "allowed_values": ["left", "right"],
         "description": "Informational mount side label for the LiDAR position.",
+        "help_text": (
+            "This is a label for which side of the belt the LiDAR is mounted on. "
+            "Right now it is mainly for documentation and clarity in the UI. "
+            "Changing it does not move the plotted geometry by itself, but it helps keep the "
+            "parameter sheet consistent with the real hardware layout."
+        ),
     },
     ("mount", "sensor_x_m"): {
         "fine_step": 0.01,
         "coarse_step": 0.05,
         "description": "LiDAR position left/right. Positive is right of belt centerline.",
+        "help_text": (
+            "This is the LiDAR's sideways position in meters in the loader frame. "
+            "Positive moves the sensor to the right side of the belt, negative moves it left. "
+            "If you change this, the red sensor marker and the whole point cloud interpretation "
+            "shift sideways. Use it when the plotted scene looks laterally offset from where the "
+            "real sensor actually sits."
+        ),
     },
     ("mount", "sensor_y_m"): {
         "fine_step": 0.01,
         "coarse_step": 0.10,
         "description": "LiDAR position fore/aft. Negative is behind the lip tip plane.",
+        "help_text": (
+            "This is how far forward or backward the LiDAR sits relative to the lip tip plane. "
+            "Negative means the sensor is behind the lip, positive would mean in front of it. "
+            "Changing this moves the red sensor marker forward or backward and changes where all "
+            "measured points land in loader coordinates. Use it when the whole scene looks too "
+            "far forward or too far back."
+        ),
     },
     ("mount", "sensor_z_m"): {
         "fine_step": 0.01,
         "coarse_step": 0.05,
         "description": "LiDAR height above the belt.",
+        "help_text": (
+            "This is the LiDAR height above the belt in meters. "
+            "The current top-down 2D viewer does not use this value yet, so changing it will not "
+            "visibly move anything on the plot right now. It is still important to record because "
+            "scan-plane height matters for whether the LiDAR actually cuts through useful aircraft "
+            "and cargo-door geometry."
+        ),
     },
     ("mount", "scan_angle_offset_deg"): {
         "fine_step": 0.5,
         "coarse_step": 5.0,
         "description": "Rotates the scan into the loader frame.",
+        "help_text": (
+            "This is the yaw rotation used to align the LiDAR's own angle reference with the "
+            "loader frame. If the point cloud looks rotated, skewed, or points in the wrong "
+            "direction, this is usually the first parameter to tune. Increasing it rotates the "
+            "measured scene around the red sensor marker."
+        ),
     },
     ("mount", "pitch_deg"): {
         "fine_step": 0.5,
         "coarse_step": 2.0,
         "description": "Placeholder pitch parameter for future 3D-aware logic.",
+        "help_text": (
+            "This is the up/down tilt of the LiDAR in degrees. "
+            "In the current 2D top-down math it is stored but not yet used, so it will not change "
+            "the plot today. Later it will matter when we model whether the scan plane passes "
+            "through the cargo-door geometry at the correct height."
+        ),
     },
     ("lip", "center_x_m"): {
         "fine_step": 0.01,
         "coarse_step": 0.05,
         "description": "Lip centerline in the loader frame.",
+        "help_text": (
+            "This is the sideways center position of the loader lip. "
+            "Changing it moves the green lip and the green centerline left or right. "
+            "The center-offset readout is computed relative to this lip center, so use this when "
+            "your known lip geometry is not lined up with the real loader."
+        ),
     },
     ("lip", "tip_y_m"): {
         "fine_step": 0.01,
         "coarse_step": 0.05,
         "description": "Lip tip plane in the loader frame.",
+        "help_text": (
+            "This is the forward position of the lip tip plane. "
+            "It acts like the main zero reference for forward distance, so changing it moves the "
+            "green lip forward or backward and also changes the measured forward-return distance. "
+            "Use it when your chosen loader origin does not match where the real lip tip should be."
+        ),
     },
     ("lip", "width_m"): {
         "fine_step": 0.01,
         "coarse_step": 0.05,
         "description": "Usable lip width.",
+        "help_text": (
+            "This is the usable width of the loader lip. "
+            "Changing it makes the green lip line wider or narrower. "
+            "Left and right clearance are measured between the lip edges and the target opening "
+            "edges, so this value directly affects the clearance numbers."
+        ),
     },
     ("target", "center_x_m"): {
         "fine_step": 0.01,
         "coarse_step": 0.05,
         "description": "Target opening centerline.",
+        "help_text": (
+            "This is the sideways center of the cargo-door opening or mock target. "
+            "Changing it moves the orange opening and orange centerline left or right. "
+            "If the target is shifted right, the center-offset result will tell the loader to move "
+            "right, and vice versa."
+        ),
     },
     ("target", "opening_width_m"): {
         "fine_step": 0.01,
         "coarse_step": 0.05,
         "description": "Opening width for the mock docking target.",
+        "help_text": (
+            "This is the full width of the orange target opening. "
+            "Changing it makes the opening wider or narrower symmetrically around its center. "
+            "It affects the left and right clearance numbers because those are measured between "
+            "the opening edges and the lip edges."
+        ),
     },
     ("target", "forward_y_m"): {
         "fine_step": 0.01,
         "coarse_step": 0.10,
         "description": "Forward target distance from the lip tip plane.",
+        "help_text": (
+            "This is how far in front of the lip tip the target opening sits. "
+            "Changing it moves the orange target line forward or backward in the scene. "
+            "Use it when your mock opening or estimated aircraft opening is not at the correct "
+            "distance from the loader."
+        ),
     },
     ("target", "left_edge_trim_m"): {
         "fine_step": 0.005,
         "coarse_step": 0.02,
         "description": "Asymmetric trim for the left target edge.",
+        "help_text": (
+            "This lets you adjust only the left edge of the orange opening without moving the "
+            "target centerline. Positive values move the left edge to the right, which effectively "
+            "reduces the opening on the left side. Use it when the opening is not symmetric or when "
+            "you want to model one side more tightly than the other."
+        ),
     },
     ("target", "right_edge_trim_m"): {
         "fine_step": 0.005,
         "coarse_step": 0.02,
         "description": "Asymmetric trim for the right target edge.",
+        "help_text": (
+            "This lets you adjust only the right edge of the orange opening without moving the "
+            "target centerline. Positive values move the right edge farther right, which makes the "
+            "opening effectively larger on that side. Use it when the target opening is asymmetric "
+            "or when you want different margins on the two sides."
+        ),
     },
     ("guidance", "corridor_center_x_m"): {
         "fine_step": 0.01,
         "coarse_step": 0.05,
         "description": "Center of the forward-distance corridor.",
+        "help_text": (
+            "This sets the sideways center of the blue corridor used to compute the live forward "
+            "return. Only points inside this corridor are allowed to count as the current forward "
+            "distance. Move it left or right if you want the forward-distance reading to track a "
+            "different slice of the scene."
+        ),
     },
     ("guidance", "corridor_half_width_m"): {
         "fine_step": 0.01,
         "coarse_step": 0.05,
         "description": "Half-width of the forward-distance corridor.",
+        "help_text": (
+            "This controls how wide the blue forward-distance corridor is. "
+            "A larger value accepts points from a wider area, which can make the readout easier to "
+            "hit but also more sensitive to nearby clutter. A smaller value makes the forward "
+            "measurement more selective."
+        ),
     },
     ("guidance", "centered_band_m"): {
         "fine_step": 0.005,
         "coarse_step": 0.02,
         "description": "How close to zero offset counts as CENTERED.",
+        "help_text": (
+            "This is the deadband around zero center offset. "
+            "If the lip and target centers are within this band, the status reads CENTERED instead "
+            "of telling you to move left or right. Increase it if the status flips too easily; "
+            "decrease it if you want stricter centering."
+        ),
+    },
+    ("filtering", "min_quality"): {
+        "description": "Ignore weak LiDAR returns below this quality threshold.",
+        "help_text": (
+            "This rejects points whose LiDAR quality value is too low. "
+            "Higher values mean cleaner but fewer points. Lower values mean more points, but also "
+            "more noise and spurious hits. If the plot looks messy, try increasing this a little."
+        ),
+    },
+    ("filtering", "min_range_m"): {
+        "description": "Ignore returns closer than this distance from the sensor.",
+        "help_text": (
+            "This throws away points that are too close to the LiDAR. "
+            "It is useful for removing self-hits from the loader structure or odd near-field noise. "
+            "Increase it if the plot is cluttered near the sensor; decrease it if you actually need "
+            "to see close geometry."
+        ),
+    },
+    ("filtering", "max_range_m"): {
+        "description": "Ignore returns farther than this distance from the sensor.",
+        "help_text": (
+            "This throws away points that are too far away. "
+            "Reducing it helps the plot focus on the nearby docking scene and removes far clutter. "
+            "Increasing it lets you see more distant returns, but can also add irrelevant points."
+        ),
+    },
+    ("visualization", "x_min_m"): {
+        "description": "Left edge of the plot in loader coordinates.",
+        "help_text": (
+            "This sets how far left the browser plot extends. "
+            "It does not change the LiDAR math itself; it only changes the visible window. "
+            "Make it more negative to show more space on the left side."
+        ),
+    },
+    ("visualization", "x_max_m"): {
+        "description": "Right edge of the plot in loader coordinates.",
+        "help_text": (
+            "This sets how far right the browser plot extends. "
+            "It only changes the visible viewing area, not the sensor math. "
+            "Increase it if geometry on the right side is getting clipped."
+        ),
+    },
+    ("visualization", "y_min_m"): {
+        "description": "Rear edge of the plot in loader coordinates.",
+        "help_text": (
+            "This sets how far backward the plot shows. "
+            "More negative values show more space behind the lip and sensor. "
+            "It is a display setting only, useful for giving yourself more context during tuning."
+        ),
+    },
+    ("visualization", "y_max_m"): {
+        "description": "Forward edge of the plot in loader coordinates.",
+        "help_text": (
+            "This sets how far forward the plot shows. "
+            "Increase it if the aircraft or mock target extends beyond the current visible area. "
+            "It only changes the viewing window, not the measurement logic."
+        ),
+    },
+    ("visualization", "point_ttl_s"): {
+        "description": "How long old points stay visible on the plot.",
+        "help_text": (
+            "This is the point persistence time. "
+            "Longer values leave a longer point trail, which makes motion easier to see but can "
+            "look smeared. Shorter values make the plot more real-time and crisp, but points may "
+            "disappear quickly."
+        ),
+    },
+    ("visualization", "angle_bucket_deg"): {
+        "description": "Angular bucket size for keeping recent points.",
+        "help_text": (
+            "The viewer keeps only the newest point in each angular bucket. "
+            "Smaller bucket values preserve more detail but can look noisier. Larger bucket values "
+            "simplify the plot and reduce visual clutter, but also throw away fine detail."
+        ),
+    },
+    ("visualization", "update_period_s"): {
+        "description": "How often the viewer refreshes.",
+        "help_text": (
+            "This is the refresh interval for the live display. "
+            "Smaller values update more often and feel smoother, but use more CPU. "
+            "Larger values reduce CPU usage but make the interface feel slower."
+        ),
+    },
+    ("visualization", "point_size"): {
+        "description": "Size of the plotted LiDAR dots.",
+        "help_text": (
+            "This controls how big the LiDAR points look on the screen. "
+            "It is purely visual. Increase it if the points are too hard to see; decrease it if "
+            "the plot looks too chunky or crowded."
+        ),
+    },
+    ("console", "print_interval_s"): {
+        "description": "How often the terminal prints the current readout.",
+        "help_text": (
+            "This controls how often the program writes guidance numbers into the terminal log. "
+            "It does not change the browser UI timing. Lower values print more often and create "
+            "more log output; higher values keep the terminal quieter."
+        ),
     },
     ("simulation", "enabled"): {
         "description": "Enable or disable fake scene generation in simulate mode.",
+        "help_text": (
+            "This controls whether simulate mode actually generates a fake docking scene. "
+            "If this is off, running the demo in simulate mode will show little or no synthetic "
+            "geometry. Leave it on for demos without real hardware."
+        ),
+    },
+    ("simulation", "reveal_depth_m"): {
+        "description": "Depth of the fake wall geometry behind the opening.",
+        "help_text": (
+            "This is how much depth the fake simulated scene has behind the opening line. "
+            "Increasing it makes the simulated opening look deeper. It only affects the synthetic "
+            "demo scene, not live LiDAR mode."
+        ),
+    },
+    ("simulation", "wall_point_spacing_m"): {
+        "description": "Spacing between fake wall points in the simulated scene.",
+        "help_text": (
+            "This sets how densely the fake wall is sampled in simulation. "
+            "Smaller spacing gives a denser, more solid-looking wall. Larger spacing gives a more "
+            "sparse, dotted wall. It only affects simulate mode."
+        ),
+    },
+    ("simulation", "noise_m"): {
+        "description": "Random position jitter added to simulated points.",
+        "help_text": (
+            "This adds random jitter to the fake simulated points. "
+            "Use a low value for a clean demo scene and a higher value if you want the simulation "
+            "to feel noisier and more realistic."
+        ),
+    },
+    ("simulation", "background_clutter_points"): {
+        "description": "Random clutter points added in simulate mode.",
+        "help_text": (
+            "This adds extra random points in the simulated background. "
+            "It is useful for testing how the UI behaves when the scene is not perfectly clean. "
+            "Higher values make the fake scene messier."
+        ),
     },
 }
 
@@ -197,6 +437,7 @@ class ParameterSpec:
     section: str
     key: str
     description: str
+    help_text: str
     fine_step: float | int | None
     coarse_step: float | int | None
     allowed_values: list[Any] | None = None
@@ -839,12 +1080,24 @@ def build_parameter_specs(config: dict[str, Any]) -> list[ParameterSpec]:
                     "description",
                     f"Editable value for {section}.{key}.",
                 ),
+                help_text=metadata.get(
+                    "help_text",
+                    default_help_text(section, key),
+                ),
                 fine_step=metadata.get("fine_step", fine_step),
                 coarse_step=metadata.get("coarse_step", coarse_step),
                 allowed_values=metadata.get("allowed_values"),
             )
         )
     return specs
+
+
+def default_help_text(section: str, key: str) -> str:
+    return (
+        f"This parameter controls {section}.{key}. "
+        "Change it if the current behavior or geometry does not match what you expect. "
+        "The browser UI will apply the change live and save it back into the TOML file."
+    )
 
 
 def get_config_value(config: dict[str, Any], path: tuple[str, str]) -> Any:

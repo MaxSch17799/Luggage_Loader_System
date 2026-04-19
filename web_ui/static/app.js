@@ -202,14 +202,24 @@
         const row = document.createElement("div");
         row.className = "param-row";
         row.dataset.path = spec.path.toLowerCase();
-        row.dataset.search = `${spec.section} ${spec.key} ${spec.description}`.toLowerCase();
+        row.dataset.search = `${spec.section} ${spec.key} ${spec.description} ${spec.helpText || ""}`.toLowerCase();
 
         const meta = document.createElement("div");
         meta.className = "param-meta";
 
+        const header = document.createElement("div");
+        header.className = "param-header";
+
         const label = document.createElement("div");
         label.className = "param-label";
         label.textContent = spec.key;
+
+        const infoButton = document.createElement("button");
+        infoButton.type = "button";
+        infoButton.className = "info-button";
+        infoButton.textContent = "i";
+        infoButton.setAttribute("aria-label", `More info about ${spec.path}`);
+        infoButton.title = `More info about ${spec.path}`;
 
         const path = document.createElement("div");
         path.className = "param-path";
@@ -219,7 +229,17 @@
         description.className = "param-description";
         description.textContent = spec.description;
 
-        meta.append(label, path, description);
+        const helpPanel = document.createElement("div");
+        helpPanel.className = "param-help hidden";
+        helpPanel.textContent = spec.helpText || "No extra help available for this parameter yet.";
+
+        infoButton.addEventListener("click", () => {
+          helpPanel.classList.toggle("hidden");
+          infoButton.classList.toggle("active");
+        });
+
+        header.append(label, infoButton);
+        meta.append(header, path, description, helpPanel);
         row.append(meta, createControl(spec));
         list.append(row);
       });
