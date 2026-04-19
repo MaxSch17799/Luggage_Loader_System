@@ -108,7 +108,7 @@ Close the window or press `Ctrl+C` to stop it.
 
 ## Live Tuning Inside the Demo
 
-The graph window now has a built-in live parameter editor.
+The demo now opens a separate clickable parameter panel window.
 
 Any change you make there is written straight back into:
 
@@ -116,16 +116,18 @@ Any change you make there is written straight back into:
 
 This means you can tune the geometry while the demo is running and keep the values for the next launch.
 
-Main controls:
+How it works:
 
-- `[` or `,` or `p`: previous parameter
-- `]` or `.` or `n`: next parameter
-- `left/right` or `a/d` or `- / +`: fine adjust
-- `down/up` or `s/w`: coarse adjust
-- `t`: toggle enum or boolean values
-- `r`: reload the TOML file from disk
-- `c`: clear the plotted points
-- `h` or `?`: hide/show the help panel
+- click into a numeric field
+- type a new value
+- press `Enter` or click away to apply it live
+- boolean or enum values appear as dropdowns
+- `-` and `+` buttons do fine nudges
+- `--` and `++` buttons do coarse nudges
+- `Reload From TOML` reloads the file from disk
+- `Clear Points` clears the current plot points
+
+Keyboard fallback still exists, but it is no longer the main way to edit values.
 
 Good first parameters to tune:
 

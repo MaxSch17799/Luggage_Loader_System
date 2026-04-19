@@ -24,6 +24,13 @@ from matplotlib.patches import Rectangle
 import numpy as np
 import serial
 
+try:
+    import tkinter as tk
+    from tkinter import ttk
+except Exception:
+    tk = None
+    ttk = None
+
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "system_parameters.toml"
@@ -296,6 +303,7 @@ class LiveParameterEditor:
         self.specs = build_parameter_specs(config)
         self.index = 0
         self.show_help = True
+        self.panel_enabled = False
         self.status_message = "Editor ready. Changes autosave to the TOML file."
         self.last_saved_path: tuple[str, str] | None = None
 
@@ -311,6 +319,12 @@ class LiveParameterEditor:
         self.specs = build_parameter_specs(self.config)
         self.index = min(self.index, len(self.specs) - 1)
         self.status_message = "Reloaded parameter sheet from disk."
+
+    def select_path(self, path: tuple[str, str]) -> None:
+        for index, spec in enumerate(self.specs):
+            if spec.path == path:
+                self.index = index
+                return
 
     def toggle_help(self) -> None:
         self.show_help = not self.show_help
@@ -359,29 +373,91 @@ class LiveParameterEditor:
     def _save_value(self, spec: ParameterSpec, value: Any) -> None:
         set_config_value(self.config, spec.path, value)
         save_config_value(self.config_path, spec.path, value)
+        self.select_path(spec.path)
         self.last_saved_path = spec.path
         self.status_message = f"Saved {spec.label} = {format_value_for_display(value)}"
+
+    def adjust_path(self, path: tuple[str, str], direction: int, coarse: bool) -> bool:
+        self.select_path(path)
+        return self.adjust_selected(direction, coarse)
+
+    def set_value_from_text(self, path: tuple[str, str], raw_text: str) -> bool:
+        self.select_path(path)
+        spec = self.selected_spec()
+        current = get_config_value(self.config, spec.path)
+        text = raw_text.strip()
+
+        try:
+            if spec.allowed_values:
+                normalized_lookup = {str(value).lower(): value for value in spec.allowed_values}
+                candidate = normalized_lookup[text.lower()]
+            elif isinstance(current, bool):
+                bool_lookup = {
+                    "true": True,
+                    "false": False,
+                    "1": True,
+                    "0": False,
+                    "yes": True,
+                    "no": False,
+                    "on": True,
+                    "off": False,
+                }
+                candidate = bool_lookup[text.lower()]
+            elif isinstance(current, int) and not isinstance(current, bool):
+                candidate = int(text)
+            elif isinstance(current, float):
+                candidate = float(text)
+            else:
+                candidate = text
+        except Exception:
+            self.status_message = (
+                f"Could not parse {spec.label} from '{raw_text}'. "
+                "Check the value format and try again."
+            )
+            return False
+
+        self._save_value(spec, candidate)
+        return True
 
     def render_text(self) -> str:
         spec = self.selected_spec()
         selected_value = get_config_value(self.config, spec.path)
 
         lines = [
-            "Live Parameter Editor",
+            "Parameter Editing",
             "Autosave: ON",
             f"Config: {self.config_path.name}",
             "",
-            f"Selected: {spec.label}",
-            f"Value   : {format_value_for_display(selected_value)}",
-            f"Fine    : {format_step(spec.fine_step)}",
-            f"Coarse  : {format_step(spec.coarse_step)}",
-            f"Desc    : {spec.description}",
-            "",
         ]
 
-        if self.show_help:
+        if self.panel_enabled:
             lines.extend(
                 [
+                    "Use the separate Parameter Panel window.",
+                    "Click fields, type values, and press Enter",
+                    "or click away to apply changes live.",
+                    "",
+                    f"Last edited: {spec.label}",
+                    f"Value      : {format_value_for_display(selected_value)}",
+                    "",
+                    "Fallback keys still work if needed:",
+                    "[ ]  previous/next",
+                    "left/right or a/d  fine -/+",
+                    "down/up or s/w     coarse -/+",
+                    "t toggle, r reload, c clear",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "Parameter panel window was not opened.",
+                    "Keyboard fallback is active.",
+                    "",
+                    f"Selected: {spec.label}",
+                    f"Value   : {format_value_for_display(selected_value)}",
+                    f"Fine    : {format_step(spec.fine_step)}",
+                    f"Coarse  : {format_step(spec.coarse_step)}",
+                    "",
                     "Keys",
                     "[ ] , . p n   previous / next parameter",
                     "left/right a d - +   fine - / +",
@@ -389,23 +465,326 @@ class LiveParameterEditor:
                     "t             toggle bool/enum",
                     "r             reload TOML from disk",
                     "c             clear plotted points",
-                    "h or ?        hide/show this help",
-                    "",
                 ]
-            )
-
-        lines.append("Nearby parameters")
-        for offset in range(-2, 3):
-            visible_index = (self.index + offset) % len(self.specs)
-            visible_spec = self.specs[visible_index]
-            prefix = ">" if visible_index == self.index else " "
-            visible_value = get_config_value(self.config, visible_spec.path)
-            lines.append(
-                f"{prefix} {visible_spec.label:<33} {format_value_for_display(visible_value)}"
             )
 
         lines.extend(["", f"Last action: {self.status_message}"])
         return "\n".join(lines)
+
+
+class LiveParameterPanel:
+    """Clickable Tk-based parameter form that edits the live TOML-backed config."""
+
+    def __init__(self, editor: LiveParameterEditor, point_store: PointStore) -> None:
+        self.editor = editor
+        self.point_store = point_store
+        self.window: Any | None = None
+        self.enabled = False
+        self.closed = False
+        self._last_sync_s = 0.0
+        self._suspend_widget_events = False
+        self.field_vars: dict[tuple[str, str], Any] = {}
+        self.field_widgets: dict[tuple[str, str], Any] = {}
+        self.status_var: Any | None = None
+
+        if tk is None or ttk is None:
+            self.editor.panel_enabled = False
+            self.editor.status_message = (
+                "Tk parameter panel unavailable on this system. Keyboard fallback active."
+            )
+            return
+
+        if "agg" in plt.get_backend().lower():
+            self.editor.panel_enabled = False
+            self.editor.status_message = (
+                "Clickable parameter panel skipped on non-interactive matplotlib backend."
+            )
+            return
+
+        try:
+            parent = getattr(tk, "_default_root", None)
+            if parent is None:
+                self.window = tk.Tk()
+            else:
+                self.window = tk.Toplevel(parent)
+            self.window.title("Steer Clear Live Parameter Panel")
+            self.window.geometry("1080x820")
+            self.window.minsize(860, 480)
+            self.window.protocol("WM_DELETE_WINDOW", self._on_close)
+        except Exception:
+            self.editor.panel_enabled = False
+            self.editor.status_message = (
+                "Could not open the clickable parameter panel. Keyboard fallback active."
+            )
+            self.window = None
+            return
+
+        self._build_ui()
+        self.sync_from_editor(force=True)
+        self.enabled = True
+        self.editor.panel_enabled = True
+        self.editor.status_message = (
+            "Clickable parameter panel opened. Edit fields there; changes autosave live."
+        )
+
+    def _on_close(self) -> None:
+        if self.window is not None:
+            try:
+                self.window.destroy()
+            except Exception:
+                pass
+        self.enabled = False
+        self.closed = True
+        self.editor.panel_enabled = False
+        self.editor.status_message = "Parameter panel closed. Keyboard fallback is still available."
+
+    def _bind_mousewheel(self, widget: Any, canvas: Any) -> None:
+        def on_mousewheel(event: Any) -> None:
+            if hasattr(event, "delta") and event.delta:
+                canvas.yview_scroll(int(-event.delta / 120), "units")
+            elif getattr(event, "num", None) == 4:
+                canvas.yview_scroll(-1, "units")
+            elif getattr(event, "num", None) == 5:
+                canvas.yview_scroll(1, "units")
+
+        widget.bind("<MouseWheel>", on_mousewheel)
+        widget.bind("<Button-4>", on_mousewheel)
+        widget.bind("<Button-5>", on_mousewheel)
+
+    def _build_ui(self) -> None:
+        assert self.window is not None
+
+        outer = ttk.Frame(self.window, padding=10)
+        outer.pack(fill="both", expand=True)
+
+        header = ttk.Frame(outer)
+        header.pack(fill="x", pady=(0, 8))
+
+        ttk.Label(
+            header,
+            text="Steer Clear Live Parameters",
+            font=("TkDefaultFont", 12, "bold"),
+        ).pack(side="left")
+
+        ttk.Button(header, text="Reload From TOML", command=self.reload_from_disk).pack(
+            side="right", padx=(8, 0)
+        )
+        ttk.Button(header, text="Clear Points", command=self.clear_points).pack(
+            side="right", padx=(8, 0)
+        )
+
+        ttk.Label(
+            outer,
+            text=(
+                "Click into any field, edit the value, then press Enter or click away. "
+                "Changes apply live and are written to config/system_parameters.toml."
+            ),
+            wraplength=1000,
+            justify="left",
+        ).pack(fill="x", pady=(0, 8))
+
+        canvas_frame = ttk.Frame(outer)
+        canvas_frame.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(canvas_frame, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
+        scrollable = ttk.Frame(canvas)
+
+        scrollable.bind(
+            "<Configure>",
+            lambda _event: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+        window_id = canvas.create_window((0, 0), window=scrollable, anchor="nw")
+        canvas.bind(
+            "<Configure>",
+            lambda event: canvas.itemconfigure(window_id, width=event.width),
+        )
+
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        self._bind_mousewheel(canvas, canvas)
+        self._bind_mousewheel(scrollable, canvas)
+
+        specs_by_section: dict[str, list[ParameterSpec]] = {}
+        for spec in self.editor.specs:
+            specs_by_section.setdefault(spec.section, []).append(spec)
+
+        for section_name, section_specs in specs_by_section.items():
+            section_frame = ttk.LabelFrame(
+                scrollable,
+                text=section_name,
+                padding=10,
+            )
+            section_frame.pack(fill="x", expand=True, pady=(0, 8))
+            section_frame.columnconfigure(5, weight=1)
+
+            row_index = 0
+            for spec in section_specs:
+                current_value = get_config_value(self.editor.config, spec.path)
+                var = tk.StringVar(value=format_value_for_input(current_value))
+                self.field_vars[spec.path] = var
+
+                ttk.Label(
+                    section_frame,
+                    text=spec.key,
+                    width=24,
+                ).grid(row=row_index, column=0, sticky="w", padx=(0, 8), pady=(2, 2))
+
+                if spec.allowed_values or isinstance(current_value, bool):
+                    values = (
+                        [str(value) for value in spec.allowed_values]
+                        if spec.allowed_values
+                        else ["true", "false"]
+                    )
+                    widget = ttk.Combobox(
+                        section_frame,
+                        textvariable=var,
+                        values=values,
+                        state="readonly",
+                        width=16,
+                    )
+                    widget.bind(
+                        "<<ComboboxSelected>>",
+                        lambda _event, path=spec.path: self.apply_path(path),
+                    )
+                    widget.grid(row=row_index, column=1, sticky="w", padx=(0, 8))
+                else:
+                    widget = ttk.Entry(section_frame, textvariable=var, width=18)
+                    widget.bind(
+                        "<Return>",
+                        lambda _event, path=spec.path: self.apply_path(path),
+                    )
+                    widget.bind(
+                        "<FocusOut>",
+                        lambda _event, path=spec.path: self.apply_path(path),
+                    )
+                    widget.grid(row=row_index, column=1, sticky="w", padx=(0, 8))
+
+                    ttk.Button(
+                        section_frame,
+                        text="-",
+                        width=3,
+                        command=lambda path=spec.path: self.nudge_path(path, -1, False),
+                    ).grid(row=row_index, column=2, padx=(0, 4))
+                    ttk.Button(
+                        section_frame,
+                        text="+",
+                        width=3,
+                        command=lambda path=spec.path: self.nudge_path(path, 1, False),
+                    ).grid(row=row_index, column=3, padx=(0, 4))
+                    ttk.Button(
+                        section_frame,
+                        text="--",
+                        width=4,
+                        command=lambda path=spec.path: self.nudge_path(path, -1, True),
+                    ).grid(row=row_index, column=4, padx=(0, 4))
+                    ttk.Button(
+                        section_frame,
+                        text="++",
+                        width=4,
+                        command=lambda path=spec.path: self.nudge_path(path, 1, True),
+                    ).grid(row=row_index, column=5, sticky="w", padx=(0, 8))
+
+                self.field_widgets[spec.path] = widget
+
+                ttk.Label(
+                    section_frame,
+                    text=spec.description,
+                    wraplength=700,
+                    justify="left",
+                    foreground="#555555",
+                ).grid(
+                    row=row_index + 1,
+                    column=0,
+                    columnspan=6,
+                    sticky="w",
+                    padx=(0, 8),
+                    pady=(0, 8),
+                )
+                row_index += 2
+
+        self.status_var = tk.StringVar(value=self.editor.status_message)
+        ttk.Label(
+            outer,
+            textvariable=self.status_var,
+            wraplength=1000,
+            justify="left",
+        ).pack(fill="x", pady=(8, 0))
+
+    def clear_points(self) -> None:
+        self.point_store.clear()
+        self.editor.status_message = "Cleared all plotted points from the parameter panel."
+
+    def reload_from_disk(self) -> None:
+        self.editor.reload_from_file()
+        self.point_store.clear()
+        self.sync_from_editor(force=True)
+
+    def apply_path(self, path: tuple[str, str]) -> None:
+        if self._suspend_widget_events:
+            return
+
+        variable = self.field_vars[path]
+        raw_text = str(variable.get())
+        if self.editor.set_value_from_text(path, raw_text):
+            self.point_store.clear()
+            self.sync_from_editor(force=True)
+        elif self.status_var is not None:
+            self.status_var.set(self.editor.status_message)
+
+    def nudge_path(self, path: tuple[str, str], direction: int, coarse: bool) -> None:
+        if self.editor.adjust_path(path, direction, coarse):
+            self.point_store.clear()
+            self.sync_from_editor(force=True)
+
+    def sync_from_editor(self, force: bool = False) -> None:
+        if not self.enabled or self.window is None:
+            return
+
+        self._suspend_widget_events = True
+        try:
+            for spec in self.editor.specs:
+                path = spec.path
+                if path not in self.field_vars:
+                    continue
+                widget = self.field_widgets[path]
+                try:
+                    focused_widget = self.window.focus_get()
+                except Exception:
+                    focused_widget = None
+
+                if not force and focused_widget is widget:
+                    continue
+
+                current_value = get_config_value(self.editor.config, path)
+                self.field_vars[path].set(format_value_for_input(current_value))
+        finally:
+            self._suspend_widget_events = False
+
+        if self.status_var is not None:
+            self.status_var.set(self.editor.status_message)
+
+    def poll(self) -> None:
+        if not self.enabled or self.window is None:
+            return
+
+        now_s = time.monotonic()
+        if (now_s - self._last_sync_s) >= 0.25:
+            self.sync_from_editor(force=False)
+            self._last_sync_s = now_s
+
+        try:
+            self.window.update_idletasks()
+            self.window.update()
+        except Exception:
+            self.enabled = False
+            self.closed = True
+            self.editor.panel_enabled = False
+            self.editor.status_message = (
+                "Parameter panel closed or failed. Keyboard fallback remains available."
+            )
 
 
 def load_config(config_path: pathlib.Path) -> dict[str, Any]:
@@ -525,6 +904,14 @@ def save_config_value(config_path: pathlib.Path, path: tuple[str, str], value: A
 def format_value_for_display(value: Any) -> str:
     if isinstance(value, float):
         return f"{value:.4f}"
+    return str(value)
+
+
+def format_value_for_input(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float):
+        return f"{value:.6f}".rstrip("0").rstrip(".") or "0"
     return str(value)
 
 
@@ -728,7 +1115,7 @@ def build_plot(config: dict[str, Any]) -> tuple[Any, Any, dict[str, Any]]:
     fig, ax = plt.subplots(figsize=(13, 8))
     if hasattr(fig.canvas.manager, "set_window_title"):
         fig.canvas.manager.set_window_title("Steer Clear LiDAR Live View")
-    fig.subplots_adjust(left=0.08, right=0.60, bottom=0.08, top=0.92)
+    fig.subplots_adjust(left=0.08, right=0.76, bottom=0.08, top=0.92)
 
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, alpha=0.3)
@@ -802,7 +1189,7 @@ def build_plot(config: dict[str, Any]) -> tuple[Any, Any, dict[str, Any]]:
         bbox={"facecolor": "white", "alpha": 0.85, "edgecolor": "#dddddd"},
     )
     artists["editor_text"] = fig.text(
-        0.63,
+        0.79,
         0.10,
         "",
         family="monospace",
@@ -811,7 +1198,7 @@ def build_plot(config: dict[str, Any]) -> tuple[Any, Any, dict[str, Any]]:
         bbox={"facecolor": "white", "alpha": 0.90, "edgecolor": "#cccccc"},
     )
     artists["status_text"] = fig.text(
-        0.63,
+        0.79,
         0.95,
         "",
         family="monospace",
@@ -984,7 +1371,8 @@ def main() -> int:
     print(f"Using config file: {config_path}")
     print(f"Matplotlib backend: {plt.get_backend()}")
     print(f"Configured serial port: {editor.config['serial']['port']}")
-    print("Live editor hotkeys: [ ] , . p n left/right a d - + up/down w s t r c h")
+    print("Parameter panel: click fields in the separate window when available.")
+    print("Keyboard fallback: [ ] , . p n left/right a d - + up/down w s t r c h")
 
     point_store = PointStore(
         ttl_s=float(editor.config["visualization"]["point_ttl_s"]),
@@ -1012,6 +1400,7 @@ def main() -> int:
         lambda event: handle_key_event(event, editor, point_store),
     )
     plt.show(block=False)
+    parameter_panel = LiveParameterPanel(editor, point_store)
 
     start_s = time.monotonic()
     last_console_print_s = 0.0
@@ -1020,6 +1409,8 @@ def main() -> int:
         while True:
             now_s = time.monotonic()
             config = editor.config
+
+            parameter_panel.poll()
 
             point_store.ttl_s = float(config["visualization"]["point_ttl_s"])
             point_store.bucket_deg = float(config["visualization"]["angle_bucket_deg"])
