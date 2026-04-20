@@ -178,6 +178,10 @@ def _diagnose_gps_issue(
         return (
             "UART bytes are arriving but no valid NMEA sentences were decoded. Check baudrate or line quality."
         )
+    if satellites_in_view is not None and satellites_in_view <= 2:
+        return (
+            f"Only {satellites_in_view} satellite(s) are in view. That is not enough for a usable GPS fix yet."
+        )
     if satellites_in_view is not None and satellites_in_view > 0 and (satellites_used or 0) <= 0:
         return (
             "Satellites are visible but there is still no fix. Leave the antenna outdoors with a clear sky view."
