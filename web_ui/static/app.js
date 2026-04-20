@@ -2,16 +2,22 @@
   const bootstrap = window.APP_BOOTSTRAP || {};
   const schemaUrl = "/api/schema";
   const stateUrl = "/api/state";
+  const diagnosticsUrl = "/api/diagnostics";
   const parameterUrl = "/api/parameter";
   const nudgeUrl = "/api/nudge";
   const reloadUrl = "/api/reload";
   const clearPointsUrl = "/api/clear-points";
   const lidarPowerUrl = "/api/lidar-power";
+  const restartGpsUrl = "/api/restart-gps";
   const shutdownUrl = "/api/shutdown";
 
   const sectionsRoot = document.getElementById("parameterSections");
   const metricsRoot = document.getElementById("metricsGrid");
   const hardwareGridEl = document.getElementById("hardwareGrid");
+  const diagnosticsSummaryEl = document.getElementById("diagnosticsSummary");
+  const gpsSentenceCountsEl = document.getElementById("gpsSentenceCounts");
+  const gpsRecentSentencesEl = document.getElementById("gpsRecentSentences");
+  const systemSnapshotEl = document.getElementById("systemSnapshot");
   const statusMessageEl = document.getElementById("statusMessage");
   const workerErrorEl = document.getElementById("workerError");
   const pointCounterEl = document.getElementById("pointCounter");
@@ -19,6 +25,9 @@
   const modeBadgeEl = document.getElementById("modeBadge");
   const configPathEl = document.getElementById("configPath");
   const reloadButtonEl = document.getElementById("reloadButton");
+  const refreshDiagnosticsButtonEl = document.getElementById("refreshDiagnosticsButton");
+  const restartGpsButtonEl = document.getElementById("restartGpsButton");
+  const copyDiagnosticsButtonEl = document.getElementById("copyDiagnosticsButton");
   const clearPointsButtonEl = document.getElementById("clearPointsButton");
   const lidarPowerButtonEl = document.getElementById("lidarPowerButton");
   const closeDemoButtonEl = document.getElementById("closeDemoButton");
@@ -27,7 +36,9 @@
 
   let schema = null;
   let lastState = null;
+  let lastDiagnostics = null;
   let pollInFlight = false;
+  let diagnosticsInFlight = false;
   const controlsByPath = new Map();
   let infoBubbleEl = null;
   let infoBubbleContentEl = null;
@@ -248,6 +259,7 @@
         status: state.lidar?.available
           ? (state.lidar.running ? "Running" : "Stopped")
           : "Simulation mode",
+        tone: state.lidar?.available ? (state.lidar.running ? "good" : "warning") : "warning",
         detail: state.lidar?.available
           ? `Port state: ${state.lidar.running ? "streaming" : "idle"}`
           : "No physical LiDAR in simulate mode.",
@@ -257,15 +269,19 @@
       {
         title: "GPS",
         status: state.gps?.status || "GPS status unavailable",
+        tone: state.gps?.hasFix
+          ? "good"
+          : ((state.gps?.sentenceCount ?? 0) > 0 || (state.gps?.bytesReceived ?? 0) > 0 ? "warning" : "danger"),
         detail: `Port ${state.gps?.port || "n/a"} @ ${state.gps?.baudrate || "n/a"} baud`,
         extra: state.gps?.hasFix
           ? `Lat ${formatOptionalNumber(state.gps.latitude, 6)}, Lon ${formatOptionalNumber(state.gps.longitude, 6)}`
-          : `Sentences ${state.gps?.sentenceCount ?? 0}, sats ${state.gps?.satellites ?? "n/a"}`,
+          : `${state.gps?.likelyIssue || "No GPS fix yet."} Bytes ${state.gps?.bytesReceived ?? 0}, sentences ${state.gps?.sentenceCount ?? 0}`,
         error: state.gps?.error || null,
       },
       {
         title: "LCD",
         status: state.lcd?.status || "LCD status unavailable",
+        tone: state.lcd?.connected ? "good" : (state.lcd?.enabled ? "warning" : "warning"),
         detail:
           state.lcd?.busNumber != null
             ? `i2c-${state.lcd.busNumber} at ${state.lcd.addressHex || "n/a"}`
@@ -291,7 +307,7 @@
       title.textContent = card.title;
 
       const badge = document.createElement("div");
-      badge.className = `hardware-badge ${hardwareTone(card.status)}`;
+      badge.className = `hardware-badge ${card.tone || hardwareTone(card.status)}`;
       badge.textContent = card.status;
 
       top.append(title, badge);
@@ -315,6 +331,77 @@
 
       hardwareGridEl.append(article);
     });
+  }
+
+  function renderSentenceCounts(counts) {
+    gpsSentenceCountsEl.innerHTML = "";
+    const entries = Object.entries(counts || {}).sort((a, b) => a[0].localeCompare(b[0]));
+    if (entries.length === 0) {
+      gpsSentenceCountsEl.textContent = "No valid GPS sentence counts yet.";
+      return;
+    }
+
+    entries.forEach(([key, value]) => {
+      const row = document.createElement("div");
+      row.className = "diagnostics-kv-row";
+
+      const label = document.createElement("span");
+      label.textContent = key;
+
+      const count = document.createElement("strong");
+      count.textContent = String(value);
+
+      row.append(label, count);
+      gpsSentenceCountsEl.append(row);
+    });
+  }
+
+  function renderDiagnostics(diagnostics) {
+    lastDiagnostics = diagnostics;
+    const gps = diagnostics?.gps || {};
+    const lcd = diagnostics?.lcd || {};
+    const lines = [
+      `GPS likely issue: ${gps.likelyIssue || "n/a"}`,
+      `GPS bytes: ${gps.bytesReceived ?? 0}, valid sentences: ${gps.sentenceCount ?? 0}, bad checksum: ${gps.badChecksumCount ?? 0}`,
+      `GPS sats used: ${gps.satellites ?? "n/a"}, sats in view: ${gps.satellitesInView ?? "n/a"}, fix quality: ${gps.fixQuality ?? "n/a"}`,
+      `LCD: ${lcd.status || "n/a"}`,
+    ];
+    diagnosticsSummaryEl.textContent = lines.join(" | ");
+
+    renderSentenceCounts(gps.sentenceTypeCounts);
+
+    const recentSentences = gps.recentSentences || [];
+    gpsRecentSentencesEl.textContent = recentSentences.length > 0
+      ? recentSentences.join("\n")
+      : "No GPS sentences captured yet.";
+
+    const systemLines = [];
+    const serialPorts = diagnostics?.serialPorts || [];
+    systemLines.push(`/dev/serial0 -> ${diagnostics?.serial0Target || "n/a"}`);
+    systemLines.push(
+      `Visible I2C buses: ${
+        diagnostics?.i2c?.visibleBuses?.length
+          ? diagnostics.i2c.visibleBuses.map((bus) => `i2c-${bus}`).join(", ")
+          : "none"
+      }`
+    );
+    systemLines.push(`Configured I2C bus exists: ${diagnostics?.i2c?.configuredBusExists ? "yes" : "no"}`);
+    systemLines.push("");
+    systemLines.push("Serial ports:");
+    if (serialPorts.length === 0) {
+      systemLines.push("  none");
+    } else {
+      serialPorts.forEach((port) => {
+        systemLines.push(`  ${port.device} | ${port.description} | ${port.hwid}`);
+      });
+    }
+    systemLines.push("");
+    systemLines.push("GPIO pin states:");
+    const gpioPins = diagnostics?.gpioPins || {};
+    ["2", "3", "14", "15"].forEach((pin) => {
+      systemLines.push(`  ${gpioPins[pin] || `GPIO${pin}: n/a`}`);
+    });
+    systemSnapshotEl.textContent = systemLines.join("\n");
   }
 
   function createControl(spec) {
@@ -543,6 +630,62 @@
       }, 250);
     } catch (error) {
       setStatus(`Close demo failed: ${error.message}`);
+    }
+  }
+
+  async function refreshDiagnostics() {
+    if (diagnosticsInFlight) {
+      return;
+    }
+    diagnosticsInFlight = true;
+    try {
+      const response = await fetch(diagnosticsUrl, { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error(`${response.status} ${response.statusText}`);
+      }
+      const diagnostics = await response.json();
+      renderDiagnostics(diagnostics);
+      setStatus("Diagnostics refreshed.");
+    } catch (error) {
+      setStatus(`Diagnostics refresh failed: ${error.message}`);
+    } finally {
+      diagnosticsInFlight = false;
+    }
+  }
+
+  async function restartGpsReader() {
+    try {
+      const result = await postJson(restartGpsUrl, {});
+      setStatus(result.message);
+      await pollState(true);
+      await refreshDiagnostics();
+    } catch (error) {
+      setStatus(`GPS restart failed: ${error.message}`);
+    }
+  }
+
+  async function copyDiagnostics() {
+    try {
+      if (!lastDiagnostics) {
+        await refreshDiagnostics();
+      }
+      const payload = JSON.stringify(lastDiagnostics, null, 2);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(payload);
+      } else {
+        const helper = document.createElement("textarea");
+        helper.value = payload;
+        helper.style.position = "fixed";
+        helper.style.opacity = "0";
+        document.body.append(helper);
+        helper.focus();
+        helper.select();
+        document.execCommand("copy");
+        helper.remove();
+      }
+      setStatus("Copied diagnostics JSON to the clipboard.");
+    } catch (error) {
+      setStatus(`Could not copy diagnostics: ${error.message}`);
     }
   }
 
@@ -839,6 +982,9 @@
 
   async function start() {
     reloadButtonEl.addEventListener("click", reloadToml);
+    refreshDiagnosticsButtonEl.addEventListener("click", refreshDiagnostics);
+    restartGpsButtonEl.addEventListener("click", restartGpsReader);
+    copyDiagnosticsButtonEl.addEventListener("click", copyDiagnostics);
     clearPointsButtonEl.addEventListener("click", clearPoints);
     lidarPowerButtonEl.addEventListener("click", toggleLidarPower);
     closeDemoButtonEl.addEventListener("click", closeDemo);
@@ -854,9 +1000,13 @@
 
     await loadSchema();
     await pollState(true);
+    await refreshDiagnostics();
     window.setInterval(() => {
       pollState(false);
     }, 250);
+    window.setInterval(() => {
+      refreshDiagnostics();
+    }, 5000);
   }
 
   start().catch((error) => {

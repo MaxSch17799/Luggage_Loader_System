@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import pathlib
+import subprocess
 import threading
 import time
 import traceback
+from collections import Counter, deque
 from dataclasses import dataclass
 from typing import Any
 
@@ -36,6 +38,78 @@ def format_i2c_address(value: int | None) -> str:
     if value is None:
         return "n/a"
     return f"0x{int(value):02X}"
+
+
+def safe_command_output(command: list[str]) -> str | None:
+    try:
+        result = subprocess.run(
+            command,
+            text=True,
+            capture_output=True,
+            timeout=2.0,
+            check=False,
+        )
+    except Exception:
+        return None
+
+    output = (result.stdout or result.stderr or "").strip()
+    return output or None
+
+
+def serial_port_summaries() -> list[dict[str, str]]:
+    return [
+        {
+            "device": str(port.device),
+            "description": str(port.description),
+            "hwid": str(port.hwid),
+        }
+        for port in list_ports.comports()
+    ]
+
+
+def serial_target(path: str) -> str | None:
+    target_path = pathlib.Path(path)
+    if not target_path.exists():
+        return None
+    try:
+        return str(target_path.resolve())
+    except Exception:
+        return None
+
+
+def gps_candidate_ports(
+    gps_config: dict[str, Any],
+    excluded_ports: set[str] | None = None,
+) -> list[str]:
+    excluded = excluded_ports or set()
+    preferred: list[str] = []
+    configured = str(gps_config.get("port", "/dev/ttyAMA0")).strip()
+    if configured:
+        preferred.append(configured)
+
+    preferred.extend(
+        (
+            "/dev/ttyAMA0",
+            "/dev/serial0",
+            "/dev/ttyAMA10",
+            "/dev/ttyS0",
+        )
+    )
+
+    if bool(gps_config.get("auto_detect", True)):
+        for port_info in list_ports.comports():
+            preferred.append(port_info.device)
+
+    unique_ports: list[str] = []
+    seen: set[str] = set()
+    for candidate in preferred:
+        if not candidate or candidate in excluded:
+            continue
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        unique_ports.append(candidate)
+    return unique_ports
 
 
 def _safe_float(value: Any) -> float | None:
@@ -82,6 +156,41 @@ def _verify_nmea_checksum(sentence: str) -> bool:
     return checksum == expected
 
 
+def _diagnose_gps_issue(
+    *,
+    bytes_received: int,
+    sentence_count: int,
+    has_fix: bool,
+    satellites_used: int | None,
+    satellites_in_view: int | None,
+    last_sentence_age_s: float | None,
+    running: bool,
+) -> str:
+    if not running:
+        return "GPS reader is not running."
+    if has_fix:
+        return "GPS fix acquired."
+    if bytes_received <= 0:
+        return (
+            "No UART bytes seen from the GPS. Check 5V, GND, GPS TX to Pi RX, and that the module is powered."
+        )
+    if sentence_count <= 0:
+        return (
+            "UART bytes are arriving but no valid NMEA sentences were decoded. Check baudrate or line quality."
+        )
+    if satellites_in_view is not None and satellites_in_view > 0 and (satellites_used or 0) <= 0:
+        return (
+            "Satellites are visible but there is still no fix. Leave the antenna outdoors with a clear sky view."
+        )
+    if satellites_in_view == 0:
+        return (
+            "The GPS is talking but reporting zero satellites in view. Move the antenna outdoors or check its antenna connection."
+        )
+    if last_sentence_age_s is not None and last_sentence_age_s > 3.0:
+        return "GPS sentences have gone stale. The link may be intermittent."
+    return "GPS is connected and sending data, but no usable fix is available yet."
+
+
 @dataclass
 class GPSSnapshot:
     enabled: bool
@@ -98,6 +207,17 @@ class GPSSnapshot:
     satellites: int | None
     fix_quality: int | None
     sentence_count: int
+    bytes_received: int
+    non_nmea_line_count: int
+    bad_checksum_count: int
+    satellites_in_view: int | None
+    gsa_fix_type: int | None
+    hdop: float | None
+    pdop: float | None
+    vdop: float | None
+    sentence_type_counts: dict[str, int]
+    recent_sentences: list[str]
+    likely_issue: str
     last_sentence_age_s: float | None
     last_fix_age_s: float | None
     last_sentence_type: str | None
@@ -118,6 +238,17 @@ class GPSSnapshot:
             "satellites": self.satellites,
             "fixQuality": self.fix_quality,
             "sentenceCount": self.sentence_count,
+            "bytesReceived": self.bytes_received,
+            "nonNmeaLineCount": self.non_nmea_line_count,
+            "badChecksumCount": self.bad_checksum_count,
+            "satellitesInView": self.satellites_in_view,
+            "gsaFixType": self.gsa_fix_type,
+            "hdop": self.hdop,
+            "pdop": self.pdop,
+            "vdop": self.vdop,
+            "sentenceTypeCounts": dict(self.sentence_type_counts),
+            "recentSentences": list(self.recent_sentences),
+            "likelyIssue": self.likely_issue,
             "lastSentenceAgeS": self.last_sentence_age_s,
             "lastFixAgeS": self.last_fix_age_s,
             "lastSentenceType": self.last_sentence_type,
@@ -126,13 +257,6 @@ class GPSSnapshot:
 
 class GPSWorker(threading.Thread):
     """Read NMEA sentences from a UART GPS without blocking the browser UI."""
-
-    DEFAULT_CANDIDATE_PORTS = (
-        "/dev/serial0",
-        "/dev/ttyAMA10",
-        "/dev/ttyAMA0",
-        "/dev/ttyS0",
-    )
 
     def __init__(self, gps_config: dict[str, Any], excluded_ports: set[str] | None = None) -> None:
         super().__init__(daemon=True)
@@ -143,7 +267,7 @@ class GPSWorker(threading.Thread):
 
         self.running = False
         self.connected = False
-        self.port = str(gps_config.get("port", "/dev/serial0"))
+        self.port = str(gps_config.get("port", "/dev/ttyAMA0"))
         self.baudrate = int(gps_config.get("baudrate", 9600))
         self.status = "GPS disabled."
         self.error: str | None = None
@@ -154,6 +278,16 @@ class GPSWorker(threading.Thread):
         self.satellites: int | None = None
         self.fix_quality: int | None = None
         self.sentence_count = 0
+        self.bytes_received = 0
+        self.non_nmea_line_count = 0
+        self.bad_checksum_count = 0
+        self.satellites_in_view: int | None = None
+        self.gsa_fix_type: int | None = None
+        self.hdop: float | None = None
+        self.pdop: float | None = None
+        self.vdop: float | None = None
+        self.sentence_type_counts: Counter[str] = Counter()
+        self.recent_sentences: deque[str] = deque(maxlen=8)
         self.last_sentence_monotonic: float | None = None
         self.last_fix_monotonic: float | None = None
         self.last_sentence_type: str | None = None
@@ -173,6 +307,16 @@ class GPSWorker(threading.Thread):
         if self.last_fix_monotonic is not None:
             last_fix_age = max(0.0, now_s - self.last_fix_monotonic)
 
+        likely_issue = _diagnose_gps_issue(
+            bytes_received=self.bytes_received,
+            sentence_count=self.sentence_count,
+            has_fix=self.has_fix,
+            satellites_used=self.satellites,
+            satellites_in_view=self.satellites_in_view,
+            last_sentence_age_s=last_sentence_age,
+            running=self.running,
+        )
+
         return GPSSnapshot(
             enabled=bool(self.gps_config.get("enabled", True)),
             running=self.running,
@@ -188,6 +332,17 @@ class GPSWorker(threading.Thread):
             satellites=self.satellites,
             fix_quality=self.fix_quality,
             sentence_count=self.sentence_count,
+            bytes_received=self.bytes_received,
+            non_nmea_line_count=self.non_nmea_line_count,
+            bad_checksum_count=self.bad_checksum_count,
+            satellites_in_view=self.satellites_in_view,
+            gsa_fix_type=self.gsa_fix_type,
+            hdop=self.hdop,
+            pdop=self.pdop,
+            vdop=self.vdop,
+            sentence_type_counts=dict(self.sentence_type_counts),
+            recent_sentences=list(self.recent_sentences),
+            likely_issue=likely_issue,
             last_sentence_age_s=last_sentence_age,
             last_fix_age_s=last_fix_age,
             last_sentence_type=self.last_sentence_type,
@@ -198,37 +353,26 @@ class GPSWorker(threading.Thread):
             return self._snapshot_unlocked()
 
     def _candidate_ports(self) -> list[str]:
-        preferred: list[str] = []
-        configured = str(self.gps_config.get("port", "/dev/serial0")).strip()
-        if configured:
-            preferred.append(configured)
-        preferred.extend(self.DEFAULT_CANDIDATE_PORTS)
-
-        if bool(self.gps_config.get("auto_detect", True)):
-            for port_info in list_ports.comports():
-                preferred.append(port_info.device)
-
-        unique_ports: list[str] = []
-        seen: set[str] = set()
-        for candidate in preferred:
-            if not candidate or candidate in self.excluded_ports:
-                continue
-            if candidate in seen:
-                continue
-            seen.add(candidate)
-            unique_ports.append(candidate)
-        return unique_ports
+        return gps_candidate_ports(self.gps_config, excluded_ports=self.excluded_ports)
 
     def _set_status(self, message: str, error: str | None = None) -> None:
         with self.lock:
             self.status = message
             self.error = error
 
-    def _update_fix_from_sentence(self, sentence_type: str, fields: list[str], now_s: float) -> None:
+    def _update_fix_from_sentence(
+        self,
+        sentence_type: str,
+        fields: list[str],
+        now_s: float,
+        raw_sentence: str,
+    ) -> None:
         with self.lock:
             self.last_sentence_monotonic = now_s
             self.last_sentence_type = sentence_type
             self.sentence_count += 1
+            self.sentence_type_counts[sentence_type] += 1
+            self.recent_sentences.append(raw_sentence[:120])
             self.error = None
 
             if sentence_type.endswith("RMC") and len(fields) >= 7:
@@ -268,6 +412,24 @@ class GPSWorker(threading.Thread):
                     self.has_fix = False
                     self.status = f"GPS connected on {self.port}. Waiting for satellite fix."
 
+            if sentence_type.endswith("GSV") and len(fields) >= 4:
+                satellites_in_view = None
+                try:
+                    satellites_in_view = int(fields[3] or "0")
+                except Exception:
+                    satellites_in_view = None
+                if satellites_in_view is not None:
+                    self.satellites_in_view = satellites_in_view
+
+            if sentence_type.endswith("GSA") and len(fields) >= 18:
+                try:
+                    self.gsa_fix_type = int(fields[2] or "0")
+                except Exception:
+                    self.gsa_fix_type = None
+                self.pdop = _safe_float(fields[15])
+                self.hdop = _safe_float(fields[16])
+                self.vdop = _safe_float(fields[17])
+
     def _mark_sentence_stale(self) -> None:
         stale_after_s = float(self.gps_config.get("stale_after_s", 3.0))
         with self.lock:
@@ -284,7 +446,8 @@ class GPSWorker(threading.Thread):
         timeout_s = float(self.gps_config.get("timeout_s", 0.5))
         baudrate = int(self.gps_config.get("baudrate", 9600))
         no_data_deadline = time.monotonic() + max(1.0, stale_after_s)
-        got_sentence = False
+        got_any_bytes = False
+        got_valid_sentence = False
 
         with serial.Serial(port=port, baudrate=baudrate, timeout=timeout_s) as serial_handle:
             with self.lock:
@@ -299,22 +462,33 @@ class GPSWorker(threading.Thread):
                 now_s = time.monotonic()
 
                 if not raw:
-                    if not got_sentence and now_s >= no_data_deadline:
-                        raise TimeoutError(f"No GPS NMEA sentences detected on {port}.")
+                    if not got_any_bytes and now_s >= no_data_deadline:
+                        raise TimeoutError(f"No GPS serial data detected on {port}.")
+                    if got_any_bytes and not got_valid_sentence and now_s >= no_data_deadline:
+                        raise TimeoutError(
+                            f"GPS bytes were seen on {port}, but no valid NMEA sentences were decoded."
+                        )
                     self._mark_sentence_stale()
                     continue
 
-                got_sentence = True
+                got_any_bytes = True
+                with self.lock:
+                    self.bytes_received += len(raw)
                 text = raw.decode("ascii", errors="ignore").strip()
                 if not text or not text.startswith("$"):
+                    with self.lock:
+                        self.non_nmea_line_count += 1
                     continue
                 if not _verify_nmea_checksum(text):
+                    with self.lock:
+                        self.bad_checksum_count += 1
                     continue
 
+                got_valid_sentence = True
                 body = text[1:].split("*", 1)[0]
                 fields = body.split(",")
                 sentence_type = fields[0]
-                self._update_fix_from_sentence(sentence_type, fields, now_s)
+                self._update_fix_from_sentence(sentence_type, fields, now_s, text)
 
     def run(self) -> None:
         if not bool(self.gps_config.get("enabled", True)):
@@ -693,3 +867,39 @@ class LCDController:
                 self.error = traceback.format_exc()
                 self.status = "LCD write failed. Will retry automatically."
                 self._close_driver(clear=False)
+
+
+def build_hardware_diagnostics_report(
+    *,
+    gps_snapshot: GPSSnapshot,
+    lcd_snapshot: LCDSnapshot,
+    lidar_port: str,
+    gps_port: str,
+    configured_i2c_bus: int,
+) -> dict[str, Any]:
+    pin_states: dict[str, str | None] = {}
+    for pin in (2, 3, 14, 15):
+        pin_states[str(pin)] = safe_command_output(["pinctrl", "get", str(pin)])
+
+    return {
+        "generatedAtUnixS": time.time(),
+        "serialPorts": serial_port_summaries(),
+        "serial0Target": serial_target("/dev/serial0"),
+        "lidarPort": {
+            "path": lidar_port,
+            "exists": pathlib.Path(lidar_port).exists(),
+        },
+        "gpsPort": {
+            "path": gps_port,
+            "exists": pathlib.Path(gps_port).exists(),
+            "serial0Target": serial_target(gps_port) if gps_port == "/dev/serial0" else None,
+        },
+        "i2c": {
+            "visibleBuses": detect_i2c_bus_numbers(),
+            "configuredBus": configured_i2c_bus,
+            "configuredBusExists": pathlib.Path(f"/dev/i2c-{configured_i2c_bus}").exists(),
+        },
+        "gpioPins": pin_states,
+        "gps": gps_snapshot.to_payload(),
+        "lcd": lcd_snapshot.to_payload(),
+    }

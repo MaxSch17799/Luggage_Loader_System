@@ -220,6 +220,96 @@ button:disabled {
   color: var(--danger);
 }
 
+.diagnostics-card {
+  background: var(--panel);
+  border: 1px solid rgba(216, 208, 191, 0.75);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+  padding: 16px;
+  margin-bottom: 18px;
+}
+
+.diagnostics-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+  margin-bottom: 12px;
+}
+
+.diagnostics-header h2 {
+  margin: 0 0 6px;
+}
+
+.diagnostics-header p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.diagnostics-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.diagnostics-summary {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(248, 244, 234, 0.9);
+  border: 1px solid rgba(216, 208, 191, 0.75);
+  color: var(--text);
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+.diagnostics-grid {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.diagnostics-panel {
+  border: 1px solid rgba(216, 208, 191, 0.75);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 14px;
+  min-width: 0;
+}
+
+.diagnostics-panel-title {
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+
+.diagnostics-kv {
+  display: grid;
+  gap: 8px;
+}
+
+.diagnostics-kv-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid rgba(216, 208, 191, 0.5);
+  padding-bottom: 6px;
+}
+
+.diagnostics-kv-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.diagnostics-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: #3d463f;
+}
+
 .content-grid {
   display: grid;
   grid-template-columns: 420px minmax(0, 1fr);
@@ -541,6 +631,10 @@ code {
     grid-template-columns: 1fr;
   }
 
+  .diagnostics-grid {
+    grid-template-columns: 1fr;
+  }
+
   .content-grid {
     grid-template-columns: 1fr;
   }
@@ -560,6 +654,10 @@ code {
   }
 
   .topbar {
+    flex-direction: column;
+  }
+
+  .diagnostics-header {
     flex-direction: column;
   }
 

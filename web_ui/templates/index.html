@@ -32,6 +32,35 @@
 
     <section id="hardwareGrid" class="hardware-grid"></section>
 
+    <section class="diagnostics-card">
+      <div class="diagnostics-header">
+        <div>
+          <h2>Hardware Diagnostics</h2>
+          <p>Use this panel to understand whether the GPS has no UART data, no satellites in view, or just no fix yet.</p>
+        </div>
+        <div class="diagnostics-actions">
+          <button id="refreshDiagnosticsButton" class="secondary">Refresh Diagnostics</button>
+          <button id="restartGpsButton" class="secondary">Restart GPS Reader</button>
+          <button id="copyDiagnosticsButton" class="secondary">Copy Diagnostics</button>
+        </div>
+      </div>
+      <div id="diagnosticsSummary" class="diagnostics-summary">Loading diagnostics…</div>
+      <div class="diagnostics-grid">
+        <div class="diagnostics-panel">
+          <div class="diagnostics-panel-title">GPS Sentence Counts</div>
+          <div id="gpsSentenceCounts" class="diagnostics-kv"></div>
+        </div>
+        <div class="diagnostics-panel">
+          <div class="diagnostics-panel-title">Recent GPS Sentences</div>
+          <pre id="gpsRecentSentences" class="diagnostics-pre">No GPS sentences yet.</pre>
+        </div>
+        <div class="diagnostics-panel">
+          <div class="diagnostics-panel-title">System Snapshot</div>
+          <pre id="systemSnapshot" class="diagnostics-pre">Loading system snapshot…</pre>
+        </div>
+      </div>
+    </section>
+
     <div class="content-grid">
       <aside class="sidebar">
         <div class="panel-card">

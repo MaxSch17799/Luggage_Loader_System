@@ -143,8 +143,8 @@ print_interval_s = 1.0
 enabled = true
 
 # Preferred UART device for the GPS.
-# On this Pi, /dev/serial0 is the best first choice for the GPIO header UART.
-port = "/dev/serial0"
+# On this Pi, the GPIO GPS is currently detected on /dev/ttyAMA0.
+port = "/dev/ttyAMA0"
 
 # When true, the demo will try other likely serial ports if the preferred one is silent.
 auto_detect = true

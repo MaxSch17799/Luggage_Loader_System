@@ -15,7 +15,12 @@ from typing import Any
 from flask import Flask, jsonify, render_template, request
 from werkzeug.serving import make_server
 
-from hardware_support import GPSSnapshot, LCDController, GPSWorker
+from hardware_support import (
+    GPSSnapshot,
+    LCDController,
+    GPSWorker,
+    build_hardware_diagnostics_report,
+)
 from lidar_live_view import (
     DEFAULT_CONFIG_PATH,
     LiveParameterEditor,
@@ -122,7 +127,7 @@ class DemoSession:
                 enabled=bool(gps_config.get("enabled", True)),
                 running=False,
                 connected=False,
-                port=str(gps_config.get("port", "/dev/serial0")),
+                port=str(gps_config.get("port", "/dev/ttyAMA0")),
                 baudrate=int(gps_config.get("baudrate", 9600)),
                 status="GPS reader not running.",
                 error=None,
@@ -133,6 +138,17 @@ class DemoSession:
                 satellites=None,
                 fix_quality=None,
                 sentence_count=0,
+                bytes_received=0,
+                non_nmea_line_count=0,
+                bad_checksum_count=0,
+                satellites_in_view=None,
+                gsa_fix_type=None,
+                hdop=None,
+                pdop=None,
+                vdop=None,
+                sentence_type_counts={},
+                recent_sentences=[],
+                likely_issue="GPS reader is not running.",
                 last_sentence_age_s=None,
                 last_fix_age_s=None,
                 last_sentence_type=None,
@@ -415,6 +431,7 @@ class DemoSession:
             changed = self.editor.adjust_path((section, key), direction, coarse)
             if changed:
                 self.point_store.clear()
+                self.handle_hardware_setting_change(section)
             return changed, self.editor.status_message
 
     def reload_from_disk(self) -> str:
@@ -434,6 +451,59 @@ class DemoSession:
     def lidar_power_action(self) -> str:
         with self.lock:
             return self.toggle_lidar_power()
+
+    def diagnostics_payload(self) -> dict[str, Any]:
+        with self.lock:
+            gps_snapshot = self.gps_snapshot()
+            lcd_snapshot = self.lcd_controller.snapshot()
+            diagnostics = build_hardware_diagnostics_report(
+                gps_snapshot=gps_snapshot,
+                lcd_snapshot=lcd_snapshot,
+                lidar_port=str(self.editor.config["serial"]["port"]),
+                gps_port=str(self.editor.config.get("gps", {}).get("port", "/dev/ttyAMA0")),
+                configured_i2c_bus=int(self.editor.config.get("lcd", {}).get("i2c_bus", 1)),
+            )
+            diagnostics["summaryText"] = self._diagnostics_summary_text(diagnostics)
+            return diagnostics
+
+    def _diagnostics_summary_text(self, diagnostics: dict[str, Any]) -> str:
+        gps = diagnostics["gps"]
+        lcd = diagnostics["lcd"]
+        lines = [
+            "Steer Clear Hardware Diagnostics",
+            f"LiDAR port: {diagnostics['lidarPort']['path']} (exists={diagnostics['lidarPort']['exists']})",
+            f"GPS port: {diagnostics['gpsPort']['path']} (exists={diagnostics['gpsPort']['exists']})",
+            f"/dev/serial0 -> {diagnostics.get('serial0Target') or 'n/a'}",
+            "Visible I2C buses: "
+            + (
+                ", ".join(f"i2c-{bus}" for bus in diagnostics["i2c"]["visibleBuses"])
+                if diagnostics["i2c"]["visibleBuses"]
+                else "none"
+            ),
+            f"Configured I2C bus exists: {diagnostics['i2c']['configuredBusExists']}",
+            "",
+            f"GPS status: {gps['status']}",
+            f"GPS likely issue: {gps['likelyIssue']}",
+            f"GPS bytes: {gps['bytesReceived']}, valid sentences: {gps['sentenceCount']}, bad checksum: {gps['badChecksumCount']}",
+            f"GPS sats used: {gps['satellites']}, sats in view: {gps['satellitesInView']}",
+            f"GPS last type: {gps['lastSentenceType']}",
+            "GPS sentence counts: "
+            + (
+                ", ".join(f"{key}={value}" for key, value in sorted(gps["sentenceTypeCounts"].items()))
+                if gps["sentenceTypeCounts"]
+                else "none"
+            ),
+            "",
+            f"LCD status: {lcd['status']}",
+            f"LCD bus/address: {lcd['busNumber']} / {lcd['addressHex']}",
+        ]
+
+        recent_sentences = gps.get("recentSentences") or []
+        if recent_sentences:
+            lines.extend(["", "Recent GPS sentences:"])
+            lines.extend(recent_sentences)
+
+        return "\n".join(lines)
 
 
 def parse_args() -> argparse.Namespace:
@@ -498,6 +568,10 @@ def create_app(session: DemoSession, shutdown_callback: Any | None = None) -> Fl
     def api_state() -> Any:
         return jsonify(session.state_payload())
 
+    @app.get("/api/diagnostics")
+    def api_diagnostics() -> Any:
+        return jsonify(session.diagnostics_payload())
+
     @app.post("/api/parameter")
     def api_parameter() -> Any:
         payload = request.get_json(force=True)
@@ -543,6 +617,21 @@ def create_app(session: DemoSession, shutdown_callback: Any | None = None) -> Fl
             session.editor.status_message = f"LiDAR power action failed: {exc}"
             return jsonify({"ok": False, "message": session.editor.status_message}), 500
 
+    @app.post("/api/restart-gps")
+    def api_restart_gps() -> Any:
+        try:
+            message = session.restart_gps()
+            return jsonify(
+                {
+                    "ok": True,
+                    "message": message,
+                    "gps": session.gps_snapshot().to_payload(),
+                }
+            )
+        except Exception as exc:
+            session.editor.status_message = f"GPS restart failed: {exc}"
+            return jsonify({"ok": False, "message": session.editor.status_message}), 500
+
     @app.post("/api/shutdown")
     def api_shutdown() -> Any:
         message = session.request_shutdown()
@@ -583,7 +672,9 @@ def main() -> int:
                 index_response = client.get("/")
                 schema_response = client.get("/api/schema")
                 state_response = client.get("/api/state")
+                diagnostics_response = client.get("/api/diagnostics")
                 lidar_response = client.post("/api/lidar-power")
+                gps_response = client.post("/api/restart-gps")
                 shutdown_response = client.post("/api/shutdown")
 
             if index_response.status_code != 200:
@@ -592,8 +683,12 @@ def main() -> int:
                 raise RuntimeError("Schema route failed during smoke test")
             if state_response.status_code != 200:
                 raise RuntimeError("State route failed during smoke test")
+            if diagnostics_response.status_code != 200:
+                raise RuntimeError("Diagnostics route failed during smoke test")
             if lidar_response.status_code not in {200, 500}:
                 raise RuntimeError("LiDAR power route failed during smoke test")
+            if gps_response.status_code != 200:
+                raise RuntimeError("GPS restart route failed during smoke test")
             if shutdown_response.status_code != 200:
                 raise RuntimeError("Shutdown route failed during smoke test")
 

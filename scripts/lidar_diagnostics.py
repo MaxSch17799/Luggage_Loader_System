@@ -12,11 +12,17 @@ import sys
 import time
 import tomllib
 import traceback
+from collections import Counter
 
 import serial
 from serial.tools import list_ports
 
-from hardware_support import COMMON_LCD_ADDRESSES, detect_i2c_bus_numbers, format_i2c_address
+from hardware_support import (
+    COMMON_LCD_ADDRESSES,
+    detect_i2c_bus_numbers,
+    format_i2c_address,
+    gps_candidate_ports,
+)
 
 try:
     from smbus2 import SMBus
@@ -52,22 +58,54 @@ def print_serial_ports() -> None:
         print("-" * 72)
 
 
-def sniff_gps_nmea(port: str, baudrate: int, timeout_s: float, seconds: float) -> tuple[int, list[str]]:
+def sniff_gps_nmea(
+    port: str,
+    baudrate: int,
+    timeout_s: float,
+    seconds: float,
+) -> tuple[int, int, Counter[str], list[str], dict[str, int | None]]:
     count = 0
+    bytes_seen = 0
+    sentence_types: Counter[str] = Counter()
     examples: list[str] = []
+    summary: dict[str, int | None] = {
+        "fix_quality": None,
+        "satellites_used": None,
+        "satellites_in_view": None,
+    }
     with serial.Serial(port=port, baudrate=baudrate, timeout=timeout_s) as serial_handle:
         started = time.monotonic()
         while (time.monotonic() - started) < seconds:
             raw = serial_handle.readline()
             if not raw:
                 continue
+            bytes_seen += len(raw)
             text = raw.decode("ascii", errors="ignore").strip()
             if not text.startswith("$"):
                 continue
             count += 1
+            sentence_type = text[1:].split(",", 1)[0]
+            sentence_types[sentence_type] += 1
             if len(examples) < 3:
                 examples.append(text[:120])
-    return count, examples
+
+            body = text[1:].split("*", 1)[0]
+            fields = body.split(",")
+            if sentence_type.endswith("GGA") and len(fields) >= 8:
+                try:
+                    summary["fix_quality"] = int(fields[6] or "0")
+                except Exception:
+                    pass
+                try:
+                    summary["satellites_used"] = int(fields[7] or "0")
+                except Exception:
+                    pass
+            if sentence_type.endswith("GSV") and len(fields) >= 4:
+                try:
+                    summary["satellites_in_view"] = int(fields[3] or "0")
+                except Exception:
+                    pass
+    return count, bytes_seen, sentence_types, examples, summary
 
 
 def probe_lcd_addresses(buses: list[int], preferred_bus: int, preferred_address: int) -> list[str]:
@@ -186,7 +224,7 @@ def main() -> int:
         print(f"Configured port      : {port}")
         print(f"Configured baudrate  : {baudrate}")
         print(f"Configured timeout   : {timeout_s}")
-        print(f"GPS port             : {gps_cfg.get('port', '/dev/serial0')}")
+        print(f"GPS port             : {gps_cfg.get('port', '/dev/ttyAMA0')}")
         print(f"GPS baudrate         : {gps_cfg.get('baudrate', 9600)}")
         print(f"LCD bus              : {lcd_cfg.get('i2c_bus', 1)}")
         print(f"LCD address          : {format_i2c_address(int(lcd_cfg.get('address', 39)))}")
@@ -206,7 +244,7 @@ def main() -> int:
         print("Basic serial open/close succeeded.")
 
         print_header("GPS UART Checks")
-        gps_port = str(gps_cfg.get("port", "/dev/serial0"))
+        gps_port = str(gps_cfg.get("port", "/dev/ttyAMA0"))
         gps_baudrate = int(gps_cfg.get("baudrate", 9600))
         gps_timeout = float(gps_cfg.get("timeout_s", 0.5))
         print(f"Path exists          : {pathlib.Path(gps_port).exists()}")
@@ -219,18 +257,71 @@ def main() -> int:
         print("Basic GPS serial open/close succeeded.")
         print("")
         print("Sniffing GPS NMEA traffic for 2 seconds...")
-        gps_count, gps_examples = sniff_gps_nmea(
-            port=gps_port,
-            baudrate=gps_baudrate,
-            timeout_s=gps_timeout,
-            seconds=2.0,
-        )
-        print(f"NMEA sentences       : {gps_count}")
-        if gps_examples:
-            for example in gps_examples:
-                print(f"Example              : {example}")
-        else:
-            print("No NMEA sentences seen. Check UART enablement, TX/RX crossover, and GPS power.")
+        try:
+            gps_count, gps_bytes, gps_types, gps_examples, gps_summary = sniff_gps_nmea(
+                port=gps_port,
+                baudrate=gps_baudrate,
+                timeout_s=gps_timeout,
+                seconds=2.0,
+            )
+            print(f"Raw bytes seen       : {gps_bytes}")
+            print(f"NMEA sentences       : {gps_count}")
+            if gps_types:
+                print(
+                    "Sentence types       : "
+                    + ", ".join(f"{name}={count}" for name, count in sorted(gps_types.items()))
+                )
+            if gps_examples:
+                for example in gps_examples:
+                    print(f"Example              : {example}")
+                if gps_summary["fix_quality"] is not None:
+                    print(f"Fix quality          : {gps_summary['fix_quality']}")
+                if gps_summary["satellites_used"] is not None:
+                    print(f"Satellites used      : {gps_summary['satellites_used']}")
+                if gps_summary["satellites_in_view"] is not None:
+                    print(f"Satellites in view   : {gps_summary['satellites_in_view']}")
+                if gps_summary["satellites_in_view"] == 0:
+                    print(
+                        "Interpretation       : GPS is alive but currently sees zero satellites. "
+                        "Move the antenna outdoors or check the antenna connection."
+                    )
+                elif gps_summary["satellites_in_view"] and (gps_summary["satellites_used"] or 0) == 0:
+                    print(
+                        "Interpretation       : GPS sees satellites but does not have a position fix yet."
+                    )
+            else:
+                if gps_bytes > 0:
+                    print(
+                        "Bytes were seen but none decoded as NMEA. Check baudrate or noisy serial wiring."
+                    )
+                else:
+                    print("No NMEA sentences seen. Check UART enablement, TX/RX crossover, and GPS power.")
+                print("")
+                print("Trying other likely GPS ports...")
+                for candidate in gps_candidate_ports(gps_cfg):
+                    if candidate == gps_port:
+                        continue
+                    try:
+                        alt_count, alt_bytes, alt_types, _alt_examples, _alt_summary = sniff_gps_nmea(
+                            port=candidate,
+                            baudrate=gps_baudrate,
+                            timeout_s=gps_timeout,
+                            seconds=1.5,
+                        )
+                        print(
+                            f"{candidate:20} bytes={alt_bytes:4d} sentences={alt_count:3d} "
+                            + (
+                                "types="
+                                + ", ".join(f"{name}={count}" for name, count in sorted(alt_types.items()))
+                                if alt_types
+                                else ""
+                            )
+                        )
+                    except Exception as exc:
+                        print(f"{candidate:20} error={exc}")
+        except serial.SerialException as exc:
+            print(f"GPS NMEA sniff       : skipped ({exc})")
+            print("Interpretation       : another running demo process may already have the GPS port open.")
 
         print_header("LCD I2C Checks")
         buses = detect_i2c_bus_numbers()

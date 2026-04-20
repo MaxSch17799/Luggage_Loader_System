@@ -387,9 +387,9 @@ PARAMETER_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "description": "Preferred serial device for the GPS module.",
         "help_text": (
             "This is the first UART device the demo will try for GPS NMEA sentences. "
-            "For a GPIO-connected GPS on Raspberry Pi 5, /dev/serial0 is usually the right "
-            "starting point. If the GPS status says the port is silent, this is one of the first "
-            "settings to check."
+            "On this Pi, the GPS is currently seen on /dev/ttyAMA0. "
+            "If the GPS status says the port is silent, this is one of the first settings to "
+            "check."
         ),
     },
     ("gps", "auto_detect"): {

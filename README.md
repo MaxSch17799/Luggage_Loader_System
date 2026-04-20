@@ -100,6 +100,7 @@ What you should see:
 - a live scene plot in the browser
 - cards showing center offset, left clearance, right clearance, and forward return
 - a hardware status row for LiDAR, GPS, and LCD
+- a diagnostics panel with GPS sentence counts, recent GPS sentences, and a system snapshot
 
 Press `Ctrl+C` in the terminal to stop the server.
 
@@ -128,6 +129,9 @@ How it works:
 - `Close Demo` stops the demo server and requests LiDAR shutdown
 - the plot now overlays the live forward-distance readout and GPS coordinates
 - when enabled, the LCD shows forward distance plus latitude and longitude
+- `Refresh Diagnostics` updates the UI diagnostics panel
+- `Restart GPS Reader` restarts the UART GPS worker without stopping the whole demo
+- `Copy Diagnostics` copies a JSON snapshot of the current hardware state for troubleshooting
 
 Good first parameters to tune:
 
@@ -226,7 +230,7 @@ This checks:
 
 The browser demo now tries to use:
 
-- `gps.port`, which defaults to `/dev/serial0`
+- `gps.port`, which currently defaults to `/dev/ttyAMA0` on this Pi
 - `lcd.i2c_bus`, which defaults to `1`
 - `lcd.address`, which defaults to `39` (`0x27`)
 
